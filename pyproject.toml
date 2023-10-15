@@ -58,4 +58,4 @@ push = false
 
 [tool.bumpver.file_patterns]
 "setup.py" = ['version="{version}"']
-"src/paired/__init__.py" = ['__version__ = "{version}"
+"src/paired/__init__.py" = ['version__ = "{version}"']
