@@ -1,40 +1,34 @@
 import shutil
 from pathlib import Path
 
-import pytest
-
 from paired.aistpp import AISTPP
+from paired.aistpp.dataloader import get_test_loader, get_train_val_loader
 
 
-@pytest.fixture
-def aistpp_path(data_root):
-    root = Path(data_root).expanduser() / "aistpp"
-    yield root
-    shutil.rmtree(root)
+def test_dataset(data_root):
+    root = Path(data_root)
 
+    path = root / "aistpp"
 
-def test_download(aistpp_path):
-    AISTPP.download(path=str(aistpp_path))
-
-    def assert_exists(path):
-        assert (aistpp_path / "aistpp" / path).exists()
-
-    assert_exists("motions")
-    assert_exists("wavs")
-    assert_exists("splits/crossmodal_train.txt")
-    assert_exists("splits/crossmodal_val.txt")
-    assert_exists("splits/crossmodal_test.txt")
-    assert_exists("ignore_list.txt")
-
-def test_aistpp(aistpp_path):
-    root = Path(aistpp_path)
-
-    AISTPP.download(path=root)
-
-    train_set = AISTPP(root / "aistpp", root / "cache", split="train")
-    val_set = AISTPP(
-        root / "aistpp", root / "cache", split="val", normalizer=train_set.normalizer
-    )
+    train_set = AISTPP(path, path / "cache", split="train")
+    val_set = AISTPP(path, path / "cache", split="val", normalizer=train_set.normalizer)
     test_set = AISTPP(
-        root / "aistpp", root / "cache", split="test", normalizer=train_set.normalizer
+        path, path / "cache", split="test", normalizer=train_set.normalizer
     )
+
+    shutil.rmtree(path / "cache")
+
+
+def test_train_val_loader(data_root):
+    path = Path(data_root) / "aistpp"
+    train_loader, val_loader = get_train_val_loader(path, batch_size=4, num_workers=0)
+
+    pose, filename, wav = next(iter(train_loader))
+    pose, filename, wav = next(iter(val_loader))
+
+
+def test_get_test_loader(data_root):
+    path = Path(data_root) / "aistpp"
+    test_loader = get_test_loader(path, batch_size=4, num_workers=0)
+
+    pose, filename, wav = next(iter(test_loader))

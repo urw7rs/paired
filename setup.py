@@ -16,7 +16,15 @@ setup(
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     python_requires=">=3.7",
-    install_requires=["torch", "numpy", "gdown", "librosa", "soundfile", "matplotlib"],
+    install_requires=[
+        "torch",
+        "numpy",
+        "gdown",
+        "librosa",
+        "soundfile",
+        "matplotlib",
+        "jsonargparse",
+    ],
     extras_require={
         "test": ["pytest", "pytest-xdist"],
         "dev": ["black", "ruff", "bumpver"],
