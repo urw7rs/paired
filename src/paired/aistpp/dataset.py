@@ -68,7 +68,7 @@ class AISTPP(Dataset):
                 pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
 
         print(
-            "Loaded {self.split} Dataset With Dimensions: "
+            f"Loaded {self.split} Dataset With Dimensions: "
             + f"Pos: {data['pos'].shape}, Q: {data['q'].shape}"
         )
 
