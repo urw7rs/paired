@@ -1,9 +1,10 @@
+import time
 from pathlib import Path
 
 import pytest
+from torch.utils.data import DataLoader
 
 from paired.aistpp import AISTPP
-from paired.aistpp.dataloader import get_test_loader, get_train_val_loader
 
 
 @pytest.mark.parametrize("split", ["train", "val", "test"])
@@ -22,16 +23,31 @@ def test_dataset(data_root, split):
     music["sample_rate"]
 
 
-def test_train_val_loader(data_root):
-    path = Path(data_root) / "aistpp"
-    train_loader, val_loader = get_train_val_loader(path, batch_size=4, num_workers=0)
+@pytest.mark.parametrize("split", ["train", "val", "test"])
+def test_loader(data_root, split):
+    root = Path(data_root) / "aistpp"
+    dataset = AISTPP(root, split)
 
-    pose, filename, wav = next(iter(train_loader))
-    pose, filename, wav = next(iter(val_loader))
+    cached = []
+    for data in dataset:
+        dance = data["dance"]
+        music = data["music"]
+        sr = music["sample_rate"]
+        wav = music["wav"][:sr * 1]
 
+        trans = dance["smpl_trans"][:60 * 1]
+        poses = dance["smpl_poses"][:60 * 1]
 
-def test_get_test_loader(data_root):
-    path = Path(data_root) / "aistpp"
-    test_loader = get_test_loader(path, batch_size=4, num_workers=0)
+        cached.append(
+            {
+                "dance": {"trans": trans, "pose": poses}, 
+                "music": {"wav": wav, "sr": sr}
+            }
+        )
 
-    pose, filename, wav = next(iter(test_loader))
+    loader = DataLoader(cached, batch_size=128)
+
+    for batch in loader:
+        trans = batch["dance"]["trans"]
+        batch["dance"]["pose"]
+        wav = batch["music"]["wav"]
