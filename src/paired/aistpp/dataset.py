@@ -1,13 +1,9 @@
-import glob
-import os
 import pickle
 from pathlib import Path
-from typing import Any
 
-import numpy as np
+import librosa
 import torch
 from torch.utils.data import Dataset
-from tqdm.auto import tqdm
 
 from ..pytorch3d.transforms import (
     RotateAxisAngle,
@@ -21,128 +17,122 @@ from .vis import SMPLSkeleton
 
 
 class AISTPP(Dataset):
-    def __init__(
-        self,
-        root: str,
-        backup_path: str,
-        split: str,
-        normalizer: Any = None,
-        data_len: int = -1,
-        include_contacts: bool = True,
-        force_reload: bool = False,
-        stride: float = 0.5,
-        length: int = 5,
-    ):
+    """Load AIST++ dataset into a dictionary
+
+    Structure:
+    root
+      |- train
+      |    |- motions
+      |    |- wavs
+    """
+
+    def __init__(self, root: str, split: str, transforms=None):
         super().__init__()
 
-        self.data_path = root
-        self.raw_fps = 60
-        self.data_fps = 30
-        assert self.data_fps <= self.raw_fps
-        self.data_stride = self.raw_fps // self.data_fps
-
+        self.root = Path(root)
         self.split = split
 
-        self.normalizer = normalizer
-        self.data_len = data_len
+        # load splits
+        names = (self.root / f"splits/crossmodal_{split}.txt").read_text().split("\n")
 
-        pickle_name = f"processed_{split}_data.pkl"
+        # filter names in ignore_list.txt
+        lines = (self.root / "ignore_list.txt").read_text().split("\n")
+        ignore_names = set(line.strip() for line in lines)
 
-        backup_path = Path(backup_path)
-        backup_path.mkdir(parents=True, exist_ok=True)
+        valid_names = []
+        for name in names:
+            if name not in ignore_names:
+                valid_names.append(name)
 
-        # save normalizer
-        if not self.split != "train":
-            with open(os.path.join(backup_path, "normalizer.pkl"), "wb") as f:
-                pickle.dump(normalizer, f)
+        motion_paths = []
+        wav_paths = []
+        for name in valid_names:
+            motion_paths.append(self.root / f"motions/{name}.pkl")
+            wav_paths.append(self.root / f"wavs/{name}.wav")
 
-        # load raw data
-        if not force_reload and pickle_name in os.listdir(backup_path):
-            print("Using cached dataset...")
-            with open(os.path.join(backup_path, pickle_name), "rb") as f:
-                data = pickle.load(f)
-        else:
-            print("Loading dataset...")
-            data = self.load_aistpp(split)  # Call this last
-            with open(os.path.join(backup_path, pickle_name), "wb") as f:
-                pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
+        # sort motions and sounds
+        self.motion_paths = sorted(motion_paths)
+        self.wav_paths = sorted(wav_paths)
 
-        print(
-            f"Loaded {self.split} Dataset With Dimensions: "
-            + f"Pos: {data['pos'].shape}, Q: {data['q'].shape}"
-        )
+        self.transforms = transforms
 
-        # process data, convert to 6dof etc
-        pose_input = self.process_dataset(data["pos"], data["q"])
-        self.data = {
-            "pose": pose_input,
-            "filenames": data["filenames"],
-            "wavs": data["wavs"],
-        }
-        assert len(pose_input) == len(data["filenames"])
-        self.length = len(pose_input)
+    def __getitem__(self, index):
+        with open(self.motion_paths[index], "rb") as f:
+            dance = pickle.load(f)
+
+        y, sr = librosa.load(self.wav_paths[index])
+
+        data = {"dance": dance, "music": {"wav": y, "sample_rate": sr}}
+
+        if self.transforms is not None:
+            data = self.transforms(data)
+
+        return data
 
     def __len__(self):
-        return self.length
+        return len(self.motion_paths)
 
-    def __getitem__(self, idx):
-        filename_ = self.data["filenames"][idx]
-        return self.data["pose"][idx], filename_, self.data["wavs"][idx]
 
-    def load_aistpp(self, split):
-        """Load AIST++ dataset into a dictionary
+class ProcessedAISTPP(Dataset):
+    """Load AIST++ dataset into a dictionary
 
-        Structure:
-        root
-          |- train
-          |    |- motion_sliced
-          |    |- wav_sliced
-          |    |- motions
-          |    |- wavs
-        """
+    Structure:
+    root
+      |- train
+      |    |- motions
+      |    |- wavs
+    """
+
+    def __init__(self, root: str, split: str, include_contacts: bool = True):
+        super().__init__()
+
+        self.root = Path(root)
+        self.split = split
+
+        # load raw data
 
         # open data path
-        split_data_path = os.path.join(self.data_path, split)
+        split_data_path = Path(root) / split
+        motion_path = split_data_path / "motions"
+        wav_path = split_data_path / "wavs"
 
-        motion_path = os.path.join(split_data_path, "motions_sliced")
-        wav_path = os.path.join(split_data_path, "wavs_sliced")
         # sort motions and sounds
-        motions = sorted(glob.glob(os.path.join(motion_path, "*.pkl")))
-        wavs = sorted(glob.glob(os.path.join(wav_path, "*.wav")))
+        motions = sorted(motion_path.glob("*.pkl"))
+        wavs = sorted(wav_path.glob("*.wav"))
 
-        # stack the motions and features together
-        all_pos = []
-        all_q = []
-        all_wavs = []
-        all_names = []
-        assert len(motions) > 0
-        for motion, wav in tqdm(
-            zip(motions, wavs), dynamic_ncols=True, total=len(wavs)
-        ):
-            # make sure name is matching
-            m_name = os.path.splitext(os.path.basename(motion))[0]
-            w_name = os.path.splitext(os.path.basename(wav))[0]
-            assert m_name == w_name, str((motion, wav))
+        self.pairs = tuple(zip(motions, wavs))
 
-            # load motion
-            with open(motion, "rb") as f:
-                data = pickle.load(f)
+    def load_splits(self, split):
+        def file_to_list(f: Path):
+            lines = f.read_text().split("\n")
+            out = [x.strip() for x in lines]
+            out = [x for x in out if len(x)]
+            return out
 
-            pos = data["pos"]
-            q = data["q"]
-            all_pos.append(pos)
-            all_q.append(q)
-            all_wavs.append(wav)
-            all_names.append(m_name)
+        filter_list = set(file_to_list(self.root / "ignore_list.txt"))
+        all_files = file_to_list(self.root / f"splits/crossmodal_{split}.txt")
 
-        all_pos = np.array(all_pos)  # N x seq x 3
-        all_q = np.array(all_q)  # N x seq x (joint * 3)
-        # downsample the motions to the data fps
-        print(all_pos.shape)
-        all_pos = all_pos[:, :: self.data_stride, :]
-        all_q = all_q[:, :: self.data_stride, :]
-        data = {"pos": all_pos, "q": all_q, "filenames": all_names, "wavs": all_wavs}
-        return data
+        files = set(self.filter(all_files, filter_list))
+
+        return files
+
+    def filter(self, files, filter_list):
+        for file in files:
+            if file not in filter_list:
+                yield file
+
+    def __len__(self):
+        return len(self.pairs)
+
+    def __getitem__(self, idx):
+        motion_path, wav_path = self.pairs[idx]
+
+        with open(motion_path, "rb") as f:
+            dance = pickle.load(f)
+
+        y, sr = librosa.load(wav_path)
+
+        return {"dance": dance, "music": {"wav": y, "sample_rate": sr}}
 
     def process_dataset(self, root_pos, local_q):
         # FK skeleton

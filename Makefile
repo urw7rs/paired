@@ -8,7 +8,7 @@ format:
 	black .
 
 lint:
-	ruff check .; ruff check --fix --select I .
+	ruff check --fix .
 
 test:
 	pytest tests --data_root $(DATA_ROOT)

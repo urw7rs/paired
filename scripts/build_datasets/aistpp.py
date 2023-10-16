@@ -1,7 +1,6 @@
 import glob
 import os
 import pickle
-import shutil
 import zipfile
 from pathlib import Path
 
@@ -24,66 +23,19 @@ def download(root: str, verbose: bool = True):
     except FileNotFoundError:
         exit()
 
-    with zipfile.ZipFile() as zip_file:
+    with zipfile.ZipFile(zip_path) as zip_file:
         zip_file.extractall(root)
 
 
 def build(root: str, stride: float = 0.5, length: int = 5):
-    def build_split(root, split):
-        def fileToList(f: Path):
-            lines = f.read_text().split("\n")
-            out = [x.strip() for x in lines]
-            out = [x for x in out if len(x)]
-            return out
-
-        root = Path(root)
-        filter_list = set(fileToList(root / "ignore_list.txt"))
-        files = set(fileToList(root / f"splits/crossmodal_{split}.txt"))
-
-        def copy_splits(split, names):
-            motion_dir = root / split / "motions"
-            wav_dir = root / split / "wavs"
-
-            motion_dir.mkdir(parents=True, exist_ok=True)
-            wav_dir.mkdir(parents=True, exist_ok=True)
-
-            for name in tqdm(names):
-                if name in filter_list:
-                    continue
-
-                motion_path = root / f"motions/{name}.pkl"
-                wav_path = root / f"wavs/{name}.wav"
-
-                assert motion_path.is_file()
-                assert wav_path.is_file()
-
-                with open(motion_path, "rb") as f:
-                    motion_data = pickle.load(f)
-
-                trans = motion_data["smpl_trans"]
-                pose = motion_data["smpl_poses"]
-                scale = motion_data["smpl_scaling"]
-                out_data = {"pos": trans, "q": pose, "scale": scale}
-
-                with open(motion_dir / f"{name}.pkl", "wb") as f:
-                    pickle.dump(out_data, f)
-
-                shutil.copyfile(wav_path, wav_dir / f"{name}.wav")
-
-        # split the data according to the splits files
-        copy_splits(split, files)
-
-        # slice motions/music into sliding windows to create dataset
-        slice_aistpp(
-            motion_dir=root / f"{split}/motions",
-            wav_dir=root / f"{split}/wavs",
-            stride=stride,
-            length=length,
-        )
-
-    build_split(root, "train")
-    build_split(root, "val")
-    build_split(root, "test")
+    # slice motions/music into sliding windows to create dataset
+    root = Path(root)
+    slice_aistpp(
+        motion_dir=root / "motions",
+        wav_dir=root / "wavs",
+        stride=stride,
+        length=length,
+    )
 
 
 def slice_audio(audio_file, stride, length, out_dir):
@@ -106,23 +58,23 @@ def slice_motion(motion_file, stride, length, num_slices, out_dir):
     with open(motion_file, "rb") as f:
         motion = pickle.load(f)
 
-    pos, q = motion["pos"], motion["q"]
-    scale = motion["scale"][0]
+    trans, pose = motion["smpl_trans"], motion["smpl_poses"]
+    scale = motion["smpl_scaling"][0]
 
     file_name = os.path.splitext(os.path.basename(motion_file))[0]
     # normalize root position
-    pos /= scale
+    trans /= scale
     start_idx = 0
     window = int(length * 60)
     stride_step = int(stride * 60)
     slice_count = 0
     # slice until done or until matching audio slices
-    while start_idx <= len(pos) - window and slice_count < num_slices:
-        pos_slice, q_slice = (
-            pos[start_idx : start_idx + window],
-            q[start_idx : start_idx + window],
+    while start_idx <= len(trans) - window and slice_count < num_slices:
+        sliced_trans, sliced_pose = (
+            trans[start_idx : start_idx + window],
+            pose[start_idx : start_idx + window],
         )
-        out = {"pos": pos_slice, "q": q_slice}
+        out = {"smpl_trans": sliced_trans, "smpl_poses": sliced_pose}
 
         with open(f"{out_dir}/{file_name}_slice{slice_count}.pkl", "wb") as f:
             pickle.dump(out, f)
@@ -161,7 +113,4 @@ def slice_aistpp(motion_dir, wav_dir, stride=0.5, length=5):
 
 
 if __name__ == "__main__":
-    CLI(
-        [download, build, preprocess],
-        as_positional=False,
-    )
+    CLI([download, build], as_positional=False)

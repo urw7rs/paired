@@ -5,6 +5,9 @@
 select = ["E", "F", "I"]
 ignore = []
 
+# ignore __init__ import errors
+ignore-init-module-imports = true
+
 # Allow autofix for all enabled rules (when `--fix`) is provided.
 fixable = ["ALL"]
 unfixable = []
@@ -33,7 +36,6 @@ exclude = [
     "node_modules",
     "venv",
 ]
-per-file-ignores = {}
 
 # Same as Black.
 line-length = 88

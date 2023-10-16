@@ -1,22 +1,25 @@
-import shutil
 from pathlib import Path
+
+import pytest
 
 from paired.aistpp import AISTPP
 from paired.aistpp.dataloader import get_test_loader, get_train_val_loader
 
 
-def test_dataset(data_root):
+@pytest.mark.parametrize("split", ["train", "val", "test"])
+def test_dataset(data_root, split):
     root = Path(data_root)
 
     path = root / "aistpp"
 
-    train_set = AISTPP(path, path / "cache", split="train")
-    val_set = AISTPP(path, path / "cache", split="val", normalizer=train_set.normalizer)
-    test_set = AISTPP(
-        path, path / "cache", split="test", normalizer=train_set.normalizer
-    )
+    dataset = list(AISTPP(path, split=split))
 
-    shutil.rmtree(path / "cache")
+    data = dataset[0]
+    data["dance"]
+
+    music = data["music"]
+    music["wav"]
+    music["sample_rate"]
 
 
 def test_train_val_loader(data_root):
