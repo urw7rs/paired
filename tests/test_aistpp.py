@@ -1,4 +1,3 @@
-import time
 from pathlib import Path
 
 import pytest
@@ -33,16 +32,13 @@ def test_loader(data_root, split):
         dance = data["dance"]
         music = data["music"]
         sr = music["sample_rate"]
-        wav = music["wav"][:sr * 1]
+        wav = music["wav"][: sr * 1]
 
-        trans = dance["smpl_trans"][:60 * 1]
-        poses = dance["smpl_poses"][:60 * 1]
+        trans = dance["smpl_trans"][: 60 * 1]
+        poses = dance["smpl_poses"][: 60 * 1]
 
         cached.append(
-            {
-                "dance": {"trans": trans, "pose": poses}, 
-                "music": {"wav": wav, "sr": sr}
-            }
+            {"dance": {"trans": trans, "pose": poses}, "music": {"wav": wav, "sr": sr}}
         )
 
     loader = DataLoader(cached, batch_size=128)

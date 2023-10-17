@@ -24,6 +24,7 @@ setup(
         "soundfile",
         "matplotlib",
         "jsonargparse",
+        "smplx"
     ],
     extras_require={
         "test": ["pytest", "pytest-xdist"],

@@ -11,7 +11,7 @@ import torch
 from matplotlib import cm
 from matplotlib.colors import ListedColormap
 
-from ..pytorch3d.transforms import (
+from .pytorch3d.transforms import (
     axis_angle_to_quaternion,
     quaternion_apply,
     quaternion_multiply,
@@ -162,6 +162,52 @@ def plot_single_pose(num, poses, lines, ax, axrange, scat, contact):
         ax.set_ylim(y_min, y_max)
         ax.set_zlim(z_min, z_max)
 
+def plot_skeleton(gifname, 
+                  poses, contact=None, fps:int=60):
+
+    num_steps = poses.shape[0]
+
+    fig = plt.figure()
+    ax = fig.add_subplot(projection="3d")
+
+    point = np.array([0, 0, 1])
+    normal = np.array([0, 0, 1])
+    d = -point.dot(normal)
+    xx, yy = np.meshgrid(np.linspace(-1.5, 1.5, 2), np.linspace(-1.5, 1.5, 2))
+    z = (-normal[0] * xx - normal[1] * yy - d) * 1.0 / normal[2]
+    # plot the plane
+    ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight)
+    # Create lines initially without data
+    lines = [ax.plot([], [], [], zorder=10, linewidth=1.5)[0] for _ in smpl_parents]
+    scat = [
+        ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
+        for _ in range(4)
+    ]
+    axrange = 3
+
+    # create contact labels
+    feet = poses[:, (7, 8, 10, 11)]
+    feetv = np.zeros(feet.shape[:2])
+    feetv[:-1] = np.linalg.norm(feet[1:] - feet[:-1], axis=-1)
+    if contact is None:
+        contact = feetv < 0.01
+    else:
+        contact = contact > 0.95
+
+    # Creating the Animation object
+    anim = animation.FuncAnimation(
+        fig,
+        plot_single_pose,
+        num_steps,
+        fargs=(poses, lines, ax, axrange, scat, contact),
+        interval=1000 // fps,
+        )
+
+    anim.save(
+        gifname,
+        savefig_kwargs={"transparent": True, "facecolor": "none"},
+    )
+    plt.close()
 
 def skeleton_render(
     poses,
