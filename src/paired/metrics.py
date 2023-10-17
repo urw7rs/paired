@@ -14,7 +14,7 @@ from .vis import SMPLSkeleton
 
 
 def extract_aistpp_features(dataset, model_path):
-    smpl = SMPL(model_path=model_path, gender='MALE', batch_size=1)
+    smpl = SMPL(model_path=model_path, gender="MALE", batch_size=1)
 
     for data in tqdm(dataset):
         dance = data["dance"]
@@ -51,5 +51,5 @@ def extract_aistpp_features(dataset, model_path):
         # do FK
         positions = smpl.forward(pose, trans)  # batch x sequence x 24 x 3
 
-        manual_features = extract_manual_features(positions)
-        kinetic_features = extract_kinetic_features(positions)
+        extract_manual_features(positions)
+        extract_kinetic_features(positions)

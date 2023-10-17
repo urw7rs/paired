@@ -162,9 +162,8 @@ def plot_single_pose(num, poses, lines, ax, axrange, scat, contact):
         ax.set_ylim(y_min, y_max)
         ax.set_zlim(z_min, z_max)
 
-def plot_skeleton(gifname, 
-                  poses, contact=None, fps:int=60):
 
+def plot_skeleton(gifname, poses, contact=None, fps: int = 60):
     num_steps = poses.shape[0]
 
     fig = plt.figure()
@@ -200,14 +199,14 @@ def plot_skeleton(gifname,
         plot_single_pose,
         num_steps,
         fargs=(poses, lines, ax, axrange, scat, contact),
-        interval=1000 // fps,
-        )
+        interval=0,
+    )
 
     anim.save(
-        gifname,
-        savefig_kwargs={"transparent": True, "facecolor": "none"},
+        gifname, savefig_kwargs={"transparent": True, "facecolor": "none"}, fps=fps
     )
     plt.close()
+
 
 def skeleton_render(
     poses,

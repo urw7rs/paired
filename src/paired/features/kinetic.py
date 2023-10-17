@@ -35,7 +35,7 @@ from . import utils as feat_utils
 
 
 def extract_kinetic_features(positions):
-    assert len(positions.shape) == 3  # (seq_len, n_joints, 3) 
+    assert len(positions.shape) == 3  # (seq_len, n_joints, 3)
     features = KineticFeatures(positions)
     kinetic_feature_vector = []
     for i in range(positions.shape[1]):
@@ -52,9 +52,7 @@ def extract_kinetic_features(positions):
 
 
 class KineticFeatures:
-    def __init__(
-        self, positions, frame_time=1./60, up_vec="y", sliding_window=2
-    ):
+    def __init__(self, positions, frame_time=1.0 / 60, up_vec="y", sliding_window=2):
         self.positions = positions
         self.frame_time = frame_time
         self.up_vec = up_vec
@@ -66,10 +64,8 @@ class KineticFeatures:
             average_velocity = feat_utils.calc_average_velocity(
                 self.positions, i, joint, self.sliding_window, self.frame_time
             )
-            average_kinetic_energy += average_velocity ** 2
-        average_kinetic_energy = average_kinetic_energy / (
-            len(self.positions) - 1.0
-        )
+            average_kinetic_energy += average_velocity**2
+        average_kinetic_energy = average_kinetic_energy / (len(self.positions) - 1.0)
         return average_kinetic_energy
 
     def average_kinetic_energy_horizontal(self, joint):
@@ -83,7 +79,7 @@ class KineticFeatures:
                 self.frame_time,
                 self.up_vec,
             )
-            val += average_velocity ** 2
+            val += average_velocity**2
         val = val / (len(self.positions) - 1.0)
         return val
 
@@ -98,7 +94,7 @@ class KineticFeatures:
                 self.frame_time,
                 self.up_vec,
             )
-            val += average_velocity ** 2
+            val += average_velocity**2
         val = val / (len(self.positions) - 1.0)
         return val
 

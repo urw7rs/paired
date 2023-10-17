@@ -51,7 +51,7 @@ class AISTPP(Dataset):
 
         y, sr = librosa.load(self.wav_paths[index])
 
-        data = {"dance": dance, "music": {"wav": y, "sample_rate": sr}}
+        data = {"dance": dance, "music": y, "sample_rate": sr}
 
         if self.transforms is not None:
             data = self.transforms(data)
