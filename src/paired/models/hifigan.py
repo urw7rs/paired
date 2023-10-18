@@ -1,12 +1,45 @@
+from dataclasses import dataclass
+from typing import List, Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import AvgPool1d, Conv1d, Conv2d, ConvTranspose1d
 from torch.nn.utils import remove_weight_norm, spectral_norm, weight_norm
-from utils import get_padding, init_weights
 
 
 LRELU_SLOPE = 0.1
+
+@dataclass
+class HyperParams:
+    resblock: str
+    upsample_rates: List[int]
+    upsample_kernel_sizes: List[int]
+    upsample_initial_channel: int
+    resblock_kernel_sizes: List[int]
+    resblock_dilation_sizes: List[List[int]]
+    segment_size: int
+    num_mels: int
+    num_freq: int
+    n_fft: int
+    hop_size: int
+    win_size: int
+    sampling_rate: int
+    fmin: int
+    fmax: int
+    fmax_for_loss: Optional[int] = None
+
+
+
+def get_padding(kernel_size, dilation=1):
+    return int((kernel_size*dilation - dilation)/2)
+
+
+
+def init_weights(m, mean=0.0, std=0.01):
+    classname = m.__class__.__name__
+    if classname.find("Conv") != -1:
+        m.weight.data.normal_(mean, std)
 
 
 class ResBlock1(torch.nn.Module):
