@@ -1,11 +1,10 @@
 import itertools
-import time
 
 import torch
 import torch.nn.functional as F
 from lightning.fabric import Fabric
 
-from .models.hifigan import (
+from .models import (
     Generator,
     HyperParams,
     MultiPeriodDiscriminator,
@@ -16,7 +15,7 @@ from .models.hifigan import (
 )
 
 
-def train(fabric: Fabric, hparams:HyperParams, epochs):
+def train(fabric: Fabric, hparams: HyperParams, epochs):
     fabric.seed_everything(hparams.seed)
 
     generator = Generator(hparams)
@@ -24,7 +23,9 @@ def train(fabric: Fabric, hparams:HyperParams, epochs):
     msd = MultiScaleDiscriminator()
 
     optim_g = torch.optim.AdamW(
-        generator.parameters(), hparams.learning_rate, betas=[hparams.adam_b1, hparams.adam_b2]
+        generator.parameters(),
+        hparams.learning_rate,
+        betas=[hparams.adam_b1, hparams.adam_b2],
     )
     optim_d = torch.optim.AdamW(
         itertools.chain(msd.parameters(), mpd.parameters()),
@@ -59,21 +60,29 @@ def train(fabric: Fabric, hparams:HyperParams, epochs):
 
             y_g_hat = generator(x)
             y_g_hat_mel = mel_spectrogram(
-                    y_g_hat.squeeze(1), 
-                    hparams.n_fft, 
-                    hparams.num_mels, hparams.sampling_rate, hparams.hop_size, 
-                    hparams.win_size,
-                                  hparams.fmin, hparams.fmax_for_loss)
+                y_g_hat.squeeze(1),
+                hparams.n_fft,
+                hparams.num_mels,
+                hparams.sampling_rate,
+                hparams.hop_size,
+                hparams.win_size,
+                hparams.fmin,
+                hparams.fmax_for_loss,
+            )
 
             optim_d.zero_grad()
 
             # MPD
             y_df_hat_r, y_df_hat_g, _, _ = mpd(y, y_g_hat.detach())
-            loss_disc_f, losses_disc_f_r, losses_disc_f_g = discriminator_loss(y_df_hat_r, y_df_hat_g)
+            loss_disc_f, losses_disc_f_r, losses_disc_f_g = discriminator_loss(
+                y_df_hat_r, y_df_hat_g
+            )
 
             # MSD
             y_ds_hat_r, y_ds_hat_g, _, _ = msd(y, y_g_hat.detach())
-            loss_disc_s, losses_disc_s_r, losses_disc_s_g = discriminator_loss(y_ds_hat_r, y_ds_hat_g)
+            loss_disc_s, losses_disc_s_r, losses_disc_s_g = discriminator_loss(
+                y_ds_hat_r, y_ds_hat_g
+            )
 
             loss_disc_all = loss_disc_s + loss_disc_f
 
