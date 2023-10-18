@@ -7,7 +7,6 @@ from tqdm.auto import tqdm
 from .aistpp import AISTPP
 from .features.kinetic import extract_kinetic_features
 from .features.manual import extract_manual_features
-from .preprocess import vectorize_many
 from .pytorch3d.transforms import (
     RotateAxisAngle,
     axis_angle_to_quaternion,
@@ -18,7 +17,7 @@ from .quaternion import ax_to_6v
 from .vis import SMPLSkeleton
 
 
-cachedir = "./cache"
+cachedir = "~/paired"
 memory = Memory(cachedir, verbose=0)
 
 
@@ -51,7 +50,6 @@ def min_max_normalize(dataset, min_val, max_val):
     return normed
 
 
-@memory.cache
 def load_aistpp(root):
     def load_split(split):
         dataset = AISTPP(root, split=split)
@@ -133,12 +131,16 @@ def split_dataset(dataset, stride: float = 0.5, length: int = 5, fps: int = 30):
             slice_count += 1
 
         for pose, position, audio in zip(dance_slices, position_slices, wav_slices):
-            new_dataset.append({"dance": pose, "dance_xyz": position, "music": audio})
+            data_slice = copy.deepcopy(new_data)
+            data_slice["dance"] = pose
+            data_slice["dance_xyz"] = position
+            data_slice["music"] = audio
+
+            new_dataset.append(data_slice)
 
     return new_dataset
 
 
-@memory.cache
 def load_split_aistpp(root, stride: float = 0.5, length: int = 5):
     def load_split(split):
         dataset = AISTPP(root, split=split)
@@ -227,7 +229,7 @@ def preprocess_aistpp(dataset):
         pose = ax_to_6v(pose)
 
         # now, flatten everything into: batch x sequence x [...]
-        global_pose_vec_input = vectorize_many([trans, pose]).float()
+        global_pose_vec_input = torch.cat([trans, pose], dim=-1).float()
 
         new_data["dance"] = global_pose_vec_input[0]
         new_data["dance_xyz"] = positions[0]
