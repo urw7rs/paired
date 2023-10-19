@@ -163,14 +163,14 @@ def split_fn(data, stride: float = 0.5, length: int = 5, fps: int = 30):
 
 
 @torch.no_grad()
-def preprocess_fn(data):
+def preprocess_fn(data, fps:int=30):
     new_data = copy.deepcopy(data)
 
     dance = new_data["dance"]
 
     # convert 60fps data to 30fps
-    pose = dance["smpl_poses"][::2]
-    trans = dance["smpl_trans"][::2]
+    pose = dance["smpl_poses"][::60 // fps]
+    trans = dance["smpl_trans"][::60 // fps]
 
     # normalize translations
     trans = trans / dance["smpl_scaling"]
@@ -233,6 +233,14 @@ def extract_features_fn(data):
         "kinetic": kinetic_features,
         "geometric": manual_features,
     }
+
+    S = librosa.feature.melspectrogram(
+        y=new_data["music"], sr=new_data["sample_rate"], 
+        n_fft=1024, hop_length=256
+    )
+    S_db = librosa.power_to_db(S)
+    new_data["mel"] = S_db
+
     return new_data
 
 

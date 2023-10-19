@@ -2,6 +2,7 @@ from pathlib import Path
 
 import joblib
 import torch
+from einops import rearrange
 from jsonargparse import CLI
 from lightning.fabric import Fabric
 from torch import nn
@@ -9,7 +10,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from paired.data.aistpp import load_aistpp
-from paired.diffusion.training import HyperParams
+from paired.training import HyperParams
 
 
 class Model(nn.Module):
@@ -68,13 +69,22 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
     train_loader, val_loader = fabric.setup_dataloaders(train_loader, val_loader)
 
     def training_step(batch):
-        return model
+        # convert to 1d wav
+        motion_wav = rearrange(batch["dance"], "b t c -> (b c) t")
 
-        mag = batch["mag"]
-        phase = batch["phase"]
+        spec = torch.stft(motion_wav, n_fft=32, hop_length=8, return_complex=True)
 
-        spec = torch.cat((mag, phase), dim=-1)
-        mel = batch["mel"]
+        # convert to image
+        spec = rearrange(spec, "(b c) f t -> b c f t", b=h.batch_size)
+
+        mag = spec.abs()
+        phase = spec.angle()
+
+        x = torch.cat((mag, phase), dim=-1)
+        # 128 x 431
+        y = batch["mel"]
+
+        breakpoint()
 
         t =torch.randint(low=1, high=h.timesteps, size=(h.batch_size,))
 
