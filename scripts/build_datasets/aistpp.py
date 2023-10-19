@@ -4,6 +4,8 @@ from pathlib import Path
 import gdown
 from jsonargparse import CLI
 
+from paired.data.aistpp import AISTPP
+
 
 def download(root: str, verbose: bool = True):
     url = "https://drive.google.com/u/0/uc?id=16qYnN3qpmHMk2mOvOsOYNLy75xUmbyif"
@@ -20,6 +22,9 @@ def download(root: str, verbose: bool = True):
     with zipfile.ZipFile(zip_path) as zip_file:
         zip_file.extractall(root)
 
+
+def build(root:str, verbose: bool = True):
+    dataset = AISTPP(root, split=split)
 
 if __name__ == "__main__":
     CLI([download], as_positional=False)

@@ -107,61 +107,59 @@ def min_max_normalize(dataset, min_val, max_val):
     return normed
 
 
-def split_dataset(dataset, stride: float = 0.5, length: int = 5, fps: int = 30):
-    new_dataset = []
+def split_fn(data, stride: float = 0.5, length: int = 5, fps: int = 30):
+    new_data = copy.deepcopy(data)
 
-    for data in tqdm(dataset, dynamic_ncols=True):
-        new_data = copy.deepcopy(data)
+    dance = new_data["dance"]
+    positions = new_data["dance_xyz"]
+    wav = new_data["music"]
+    sr = new_data["sample_rate"]
 
-        dance = new_data["dance"]
-        positions = new_data["dance_xyz"]
-        wav = new_data["music"]
-        sr = new_data["sample_rate"]
+    # slice audio
+    wav_slices = []
 
-        # slice audio
-        wav_slices = []
+    start_idx = 0
+    idx = 0
+    window = int(length * sr)
+    stride_step = int(stride * sr)
+    while start_idx <= len(wav) - window:
+        wav_slice = wav[start_idx : start_idx + window]
+        wav_slices.append(wav_slice)
 
-        start_idx = 0
-        idx = 0
-        window = int(length * sr)
-        stride_step = int(stride * sr)
-        while start_idx <= len(wav) - window:
-            wav_slice = wav[start_idx : start_idx + window]
-            wav_slices.append(wav_slice)
+        start_idx += stride_step
+        idx += 1
 
-            start_idx += stride_step
-            idx += 1
+    num_slices = idx
 
-        num_slices = idx
+    # slice motion
+    dance_slices = []
+    position_slices = []
 
-        # slice motion
-        dance_slices = []
-        position_slices = []
+    start_idx = 0
+    window = int(length * 60)
+    stride_step = int(stride * 60)
+    slice_count = 0
+    # slice until done or until matching audio slices
+    while start_idx <= len(dance) - window and slice_count < num_slices:
+        dance_slice = dance[start_idx : start_idx + window]
+        dance_slices.append(dance_slice)
 
-        start_idx = 0
-        window = int(length * 60)
-        stride_step = int(stride * 60)
-        slice_count = 0
-        # slice until done or until matching audio slices
-        while start_idx <= len(dance) - window and slice_count < num_slices:
-            dance_slice = dance[start_idx : start_idx + window]
-            dance_slices.append(dance_slice)
+        position_slice = positions[start_idx : start_idx + window]
+        position_slices.append(position_slice)
 
-            position_slice = positions[start_idx : start_idx + window]
-            position_slices.append(position_slice)
+        start_idx += stride_step
+        slice_count += 1
 
-            start_idx += stride_step
-            slice_count += 1
+    data_slices = []
+    for pose, position, audio in zip(dance_slices, position_slices, wav_slices):
+        data_slice = copy.deepcopy(new_data)
+        data_slice["dance"] = pose
+        data_slice["dance_xyz"] = position
+        data_slice["music"] = audio
 
-        for pose, position, audio in zip(dance_slices, position_slices, wav_slices):
-            data_slice = copy.deepcopy(new_data)
-            data_slice["dance"] = pose
-            data_slice["dance_xyz"] = position
-            data_slice["music"] = audio
+        data_slices.append(data_slice)
 
-            new_dataset.append(data_slice)
-
-    return new_dataset
+    return data_slices
 
 
 @torch.no_grad()
@@ -219,17 +217,6 @@ def preprocess_fn(data):
     return new_data
 
 
-memory = joblib.Memory("~/.paired", verbose=0)
-
-
-@memory.cache
-def preprocess_aistpp(dataset):
-    return joblib.Parallel(n_jobs=-1)(
-        joblib.delayed(preprocess_fn)(data)
-        for data in tqdm(dataset, dynamic_ncols=True)
-    )
-
-
 @torch.no_grad()
 def extract_features_fn(data):
     new_data = copy.deepcopy(data)
@@ -249,31 +236,37 @@ def extract_features_fn(data):
     return new_data
 
 
-@memory.cache
-def extract_features(dataset):
-    return joblib.Parallel(n_jobs=-1)(
-        joblib.delayed(extract_features_fn)(data)
-        for data in tqdm(dataset, dynamic_ncols=True)
-    )
-
-
 def load_aistpp(root, return_all: bool = False, stride: float = 0.5, length: int = 5):
     def load_split(split):
         dataset = AISTPP(root, split=split)
 
-        dataset = preprocess_aistpp(dataset)
-        if return_all is False:
-            dataset = split_dataset(dataset, stride, length)
-        dataset = extract_features(dataset)
+        def parallel(fn, dataset, return_as="list"):
+            output = joblib.Parallel(n_jobs=-1)(
+                joblib.delayed(fn)(data)
+                for data in tqdm(dataset, dynamic_ncols=True)
+            )
+            return tuple(output)
+
+
+        dataset = parallel(preprocess_fn, dataset)
+        dataset = parallel(split_fn, dataset)
+
+        flattened = []
+        for data_split in dataset:
+            flattened.extend(data_split)
+        dataset = flattened
+
+        dataset = parallel(extract_features_fn, dataset)
 
         return dataset
 
     train_set = load_split("train")
-    val_set = load_split("val")
-    test_set = load_split("test")
 
     max_motion = get_max_motion(train_set)
     min_motion = get_min_motion(train_set)
+
+    val_set = load_split("val")
+    test_set = load_split("test")
 
     train_set = min_max_normalize(train_set, min_motion, max_motion)
     val_set = min_max_normalize(val_set, min_motion, max_motion)
