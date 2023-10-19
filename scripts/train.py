@@ -39,7 +39,7 @@ class WarmupLR(_LRScheduler):
         else:
             return [group["initial_lr"] for group in self.optimizer.param_groups]
 
-def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 500):
+def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: int = 50, val_interval: int = 500):
     fabric = Fabric(accelerator="gpu", devices=1, precision="16-mixed")
 
     model = UNet(x_channels=147 * 2, y_channels=1, channels_per_depth=(64, 128, 128, 128))
@@ -144,12 +144,13 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
             return
 
         loss, parts = logs
-        wandb.log({"train_loss": loss, "train_x_loss": parts["x_loss"], "train_y_loss": parts["y_loss"]})
+        wandb.log({"train_loss": loss, "train_x_loss": parts["x_loss"], "train_y_loss": parts["y_loss"]}, step=step)
 
     step = 0
     logs = None
 
-    Path("./checkpoints").mkdir(exist_ok=True)
+    ckpt_dir = Path(ckpt_dir)
+    ckpt_dir.mkdir(exist_ok=True)
 
     for batch in tqdm(infinite(train_loader), total=h.training_steps, dynamic_ncols=True, position=0):
         step += 1
@@ -174,10 +175,11 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
                 total_loss += loss
 
             n = len(val_loader)
-            wandb.log({"val_loss": total_loss, "val_x_loss": x_loss / n, "val_y_loss": y_loss / n})
+            wandb.log({"val_loss": total_loss, "val_x_loss": x_loss / n, "val_y_loss": y_loss / n}, step=step)
 
-            state = {"dm": dm, "optimizer": optimizer, "scheduler": scheduler, "step": step, "h":h}
-            fabric.save(f"checkpoints/model_{step}.ckpt", state)
+            state = {"dm": dm, "optimizer": optimizer, "scheduler": scheduler, "step": step}
+            joblib.dump(h, ckpt_dir / "hparams.joblib")
+            fabric.save(ckpt_dir / f"model_{step}.ckpt", state)
 
             model = model.train()
 
