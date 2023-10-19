@@ -1,11 +1,12 @@
 from pathlib import Path
 
-import wandb
 import joblib
 import torch
+import wandb
 from einops import rearrange
 from jsonargparse import CLI
 from lightning.fabric import Fabric
+from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader
 from torchvision.transforms import Resize
 from tqdm.auto import tqdm
@@ -21,14 +22,31 @@ def infinite(dataloader):
         for batch in dataloader:
             yield batch
 
+class WarmupLR(_LRScheduler):
+    def __init__(self, optimizer, warmup=0.0, last_epoch=-1, verbose=False):
+        self.warmup_steps = warmup
 
-def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 1000):
+        super().__init__(optimizer, last_epoch, verbose)
+
+    def get_lr(self):
+        steps = self.optimizer._step_count + 1
+
+        if steps < self.warmup_steps:
+            return [
+                group["initial_lr"] * (steps / self.warmup_steps)
+                for group in self.optimizer.param_groups
+            ]
+        else:
+            return [group["initial_lr"] for group in self.optimizer.param_groups]
+
+def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 500):
     fabric = Fabric(accelerator="gpu", devices=1, precision="16-mixed")
 
     model = UNet(x_channels=147 * 2, y_channels=1, channels_per_depth=(64, 128, 128, 128))
     dm = DDPM(model, h.timesteps, h.start, h.end)
 
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
+    scheduler = WarmupLR(optimizer, warmup=5000)
 
     dm, optimizer = fabric.setup(dm, optimizer)
 
@@ -93,6 +111,7 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
         fabric.backward(loss.mean())
 
         optimizer.step()
+        scheduler.step()
 
         return model, (loss, parts)
 
@@ -125,7 +144,7 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
             return
 
         loss, parts = logs
-        wandb.log(parts)
+        wandb.log({"train_loss": loss, "train_x_loss": parts["x_loss"], "train_y_loss": parts["y_loss"]})
 
     step = 0
     logs = None
@@ -142,10 +161,21 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
         if step % val_interval == 0:
             model = model.eval()
 
+            x_loss = 0
+            y_loss = 0
+            total_loss = 0
             for batch in tqdm(val_loader, position=1, leave=False):
-                logs = val_step(batch)
-                state = {"dm": dm, "optimizer": optimizer, "step": step, "h":h}
-                fabric.save(f"model_{step}.ckpt", state)
+                (loss, parts) = val_step(batch)
+
+                x_loss += parts["x_loss"]
+                y_loss += parts["y_loss"]
+                total_loss += loss
+
+            n = len(val_loader)
+            wandb.log({"val_loss": total_loss, "val_x_loss": x_loss / n, "val_y_loss": y_loss / n})
+
+            state = {"dm": dm, "optimizer": optimizer, "scheduler": scheduler, "step": step, "h":h}
+            fabric.save(f"model_{step}.ckpt", state)
 
             model = model.train()
 
