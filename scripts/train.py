@@ -1,25 +1,19 @@
 from pathlib import Path
 
+import wandb
 import joblib
 import torch
 from einops import rearrange
 from jsonargparse import CLI
 from lightning.fabric import Fabric
-from torch import nn
 from torch.utils.data import DataLoader
+from torchvision.transforms import Resize
 from tqdm.auto import tqdm
 
 from paired.data.aistpp import load_aistpp
+from paired.ddpm import DDPM
+from paired.model import UNet
 from paired.training import HyperParams
-
-
-class Model(nn.Module):
-    def __init__(self, hparams):
-        super().__init__()
-        self.linear = nn.Linear(3, 3)
-
-    def forward(self, x, c):
-        return x, c
 
 
 def infinite(dataloader):
@@ -27,16 +21,16 @@ def infinite(dataloader):
         for batch in dataloader:
             yield batch
 
-def forward_diffuse(h: HyperParams, x_0, t):
-    ...
 
 def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 1000):
     fabric = Fabric(accelerator="gpu", devices=1, precision="16-mixed")
 
-    model = Model(h)
+    model = UNet(x_channels=147 * 2, y_channels=1, channels_per_depth=(64, 128, 128, 128))
+    dm = DDPM(model, h.timesteps, h.start, h.end)
+
     optimizer = torch.optim.Adam(model.parameters())
 
-    model, optimizer = fabric.setup(model, optimizer)
+    dm, optimizer = fabric.setup(dm, optimizer)
 
     cache_path = Path(root) / "dataset.joblib"
 
@@ -68,52 +62,73 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
 
     train_loader, val_loader = fabric.setup_dataloaders(train_loader, val_loader)
 
+    resizer = Resize(size=(64, 64), antialias=True)
+    resizer = fabric.setup_module(resizer)
+
+    wandb.init()
+
     def training_step(batch):
         # convert to 1d wav
-        motion_wav = rearrange(batch["dance"], "b t c -> (b c) t")
+        dance = batch["dance"]
+        batch_size = dance.shape[0]
+        motion_wav = rearrange(dance, "b t c -> (b c) t")
 
-        spec = torch.stft(motion_wav, n_fft=32, hop_length=8, return_complex=True)
+        spec = torch.stft(motion_wav, n_fft=30, hop_length=6, return_complex=True)
 
         # convert to image
-        spec = rearrange(spec, "(b c) f t -> b c f t", b=h.batch_size)
+        spec = rearrange(spec, "(b c) f t -> b c f t", b=batch_size)
 
         mag = spec.abs()
         phase = spec.angle()
 
-        x = torch.cat((mag, phase), dim=-1)
-        # 128 x 431
-        y = batch["mel"]
+        # batch x 147 x 16 x 51
+        x = torch.cat((mag, phase), dim=1)
+        x = resizer(x)
+        # batch x 1 x 128 x 431
+        y = rearrange(batch["mel"].clone(), "b f t -> b 1 f t")
+        y = resizer(y)
 
-        breakpoint()
-
-        t =torch.randint(low=1, high=h.timesteps, size=(h.batch_size,))
-
-        noisy_spec = forward_diffuse(h, spec, t)
-        noisy_mel =  forward_diffuse(h, mel, t)
-
-        denoised_spec, denoised_mel = model(noisy_spec, noisy_mel)
-
-        mel_l2 = (denoised_mel - mel) ** 2
-        mel_l2 = mel_l2.mean()
-
-        spec_l2 = (denoised_spec - spec) ** 2
-        spec_l2 = spec_l2.mean()
-
-        loss = spec_l2 + mel_l2
+        loss, parts = dm.training_step(x, y)
 
         fabric.backward(loss.mean())
 
         optimizer.step()
 
-        return model
+        return model, (loss, parts)
 
     def val_step(batch):
-        ...
+        with torch.no_grad():
+            dance = batch["dance"]
+            batch_size = dance.shape[0]
+            motion_wav = rearrange(dance, "b t c -> (b c) t")
 
-    def logging():
-        ...
+            spec = torch.stft(motion_wav, n_fft=30, hop_length=6, return_complex=True)
+
+            # convert to image
+            spec = rearrange(spec, "(b c) f t -> b c f t", b=batch_size)
+
+            mag = spec.abs()
+            phase = spec.angle()
+
+            # batch x 147 x 16 x 51
+            x = torch.cat((mag, phase), dim=1)
+            x = resizer(x)
+            # batch x 1 x 128 x 431
+            y = rearrange(batch["mel"].clone(), "b f t -> b 1 f t")
+            y = resizer(y)
+
+            loss, parts = dm.training_step(x, y)
+            return (loss, parts)
+
+    def logging(logs):
+        if logs is None:
+            return
+
+        loss, parts = logs
+        wandb.log(parts)
 
     step = 0
+    logs = None
 
     for batch in tqdm(infinite(train_loader), total=h.training_steps, dynamic_ncols=True, position=0):
         step += 1
@@ -122,17 +137,19 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
             break
 
         if step % log_interval == 0:
-            logging()
+            logging(logs)
 
         if step % val_interval == 0:
             model = model.eval()
 
             for batch in tqdm(val_loader, position=1, leave=False):
-                val_step(batch)
+                logs = val_step(batch)
+                state = {"dm": dm, "optimizer": optimizer, "step": step, "h":h}
+                fabric.save(f"model_{step}.ckpt", state)
 
             model = model.train()
 
-        model = training_step(batch)
+        model, logs = training_step(batch)
 
 
 if __name__ == "__main__":

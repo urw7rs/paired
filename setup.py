@@ -27,6 +27,8 @@ setup(
         "smplx",
         "lightning==2.1",
         "einops",
+        "torchvision",
+        "wandb"
     ],
     extras_require={
         "test": ["pytest", "pytest-xdist"],

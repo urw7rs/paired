@@ -231,7 +231,8 @@ class UNet(nn.Module):
 
     def __init__(
         self,
-        in_channels=3,
+        x_channels=141,
+        y_channels=1,
         pos_dim=128,
         emb_dim=512,
         num_groups=32,
@@ -258,8 +259,11 @@ class UNet(nn.Module):
             default_act(),
         )
 
-        self.input_conv = nn.Conv2d(
-            in_channels, channels[0], kernel_size=3, stride=1, padding=1
+        self.x_input_conv = nn.Conv2d(
+            x_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1
+        )
+        self.y_input_conv = nn.Conv2d(
+            y_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1
         )
 
         default_resblock = functools.partial(
@@ -316,15 +320,20 @@ class UNet(nn.Module):
             ]
         )
 
-        self.output_conv = norm_act_drop_conv(
-            channels[0], 2 * in_channels, num_groups, p=0.0
+        self.x_output_conv = norm_act_drop_conv(
+            channels[0], x_channels, num_groups, p=0.0
         )
 
-    def forward(self, x, c):
+        self.y_output_conv = norm_act_drop_conv(
+            channels[0], y_channels, num_groups, p=0.0
+        )
+
+    def forward(self, x, y, c):
         r"""Predicts noise from x
 
         Args:
             x (torch.Tensor): image of shape :math:`(N, C, H, W)`
+            y (torch.Tensor): image of shape :math:`(N, C, H, W)`
             c (torch.Tensor): timestep of shape :math:`(N,)`
 
         Returns:
@@ -332,7 +341,10 @@ class UNet(nn.Module):
         """
         t = self.condition(c)
 
-        x = self.input_conv(x)
+        x = self.x_input_conv(x)
+        y = self.y_input_conv(y)
+
+        x = torch.cat((x, y), dim=1)
 
         outputs = [x]
 
@@ -354,5 +366,6 @@ class UNet(nn.Module):
             else:
                 x = f(x)
 
-        x = self.output_conv(x)
-        return x
+        y = self.y_output_conv(x)
+        x = self.x_output_conv(x)
+        return x, y

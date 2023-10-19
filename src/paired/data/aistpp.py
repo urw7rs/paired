@@ -238,8 +238,9 @@ def extract_features_fn(data):
         y=new_data["music"], sr=new_data["sample_rate"], 
         n_fft=1024, hop_length=256
     )
-    S_db = librosa.power_to_db(S)
-    new_data["mel"] = S_db
+    log_S = librosa.power_to_db(S, top_db=80) / 80
+
+    new_data["mel"] = log_S
 
     return new_data
 
