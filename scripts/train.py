@@ -39,8 +39,9 @@ class WarmupLR(_LRScheduler):
         else:
             return [group["initial_lr"] for group in self.optimizer.param_groups]
 
-def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: int = 50, val_interval: int = 500):
+def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: int = 50, val_interval: int = 1000):
     fabric = Fabric(accelerator="gpu", devices=1, precision="16-mixed")
+    fabric.seed_everything(h.seed)
 
     model = UNet(x_channels=147 * 2, y_channels=1, channels_per_depth=(64, 128, 128, 128))
     dm = DDPM(model, h.timesteps, h.start, h.end)
@@ -80,7 +81,7 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
 
     train_loader, val_loader = fabric.setup_dataloaders(train_loader, val_loader)
 
-    resizer = Resize(size=(64, 64), antialias=True)
+    resizer = Resize(size=(32, 64), antialias=True)
     resizer = fabric.setup_module(resizer)
 
     wandb.init()
@@ -150,7 +151,7 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
     logs = None
 
     ckpt_dir = Path(ckpt_dir)
-    ckpt_dir.mkdir(exist_ok=True)
+    ckpt_dir.mkdir()
 
     for batch in tqdm(infinite(train_loader), total=h.training_steps, dynamic_ncols=True, position=0):
         step += 1
@@ -187,4 +188,5 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
 
 
 if __name__ == "__main__":
+    torch.set_float32_matmul_precision('medium')
     CLI(main, as_positional=False)

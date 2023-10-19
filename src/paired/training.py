@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 @dataclass
 class HyperParams:
+    seed: int =42
     batch_size: int = 128
     training_steps: int = 300_000
     timesteps: int = 1000
