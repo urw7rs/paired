@@ -25,7 +25,8 @@ setup(
         "matplotlib",
         "jsonargparse",
         "smplx",
-        "lightning==2.1"
+        "lightning==2.1",
+        "einops",
     ],
     extras_require={
         "test": ["pytest", "pytest-xdist"],

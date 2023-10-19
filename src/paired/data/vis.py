@@ -11,7 +11,7 @@ import torch
 from matplotlib import cm
 from matplotlib.colors import ListedColormap
 
-from .pytorch3d.transforms import (
+from ..pytorch3d.transforms import (
     axis_angle_to_quaternion,
     quaternion_apply,
     quaternion_multiply,
@@ -318,10 +318,7 @@ def skeleton_render(
 
 
 class SMPLSkeleton:
-    def __init__(
-        self,
-        device=None,
-    ):
+    def __init__(self, device=None):
         offsets = smpl_offsets
         parents = smpl_parents
         assert len(offsets) == len(parents)
