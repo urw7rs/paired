@@ -149,6 +149,8 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
     step = 0
     logs = None
 
+    Path("./checkpoints").mkdir(exist_ok=True)
+
     for batch in tqdm(infinite(train_loader), total=h.training_steps, dynamic_ncols=True, position=0):
         step += 1
 
@@ -175,7 +177,7 @@ def main(root: str, h: HyperParams, log_interval: int = 50, val_interval: int = 
             wandb.log({"val_loss": total_loss, "val_x_loss": x_loss / n, "val_y_loss": y_loss / n})
 
             state = {"dm": dm, "optimizer": optimizer, "scheduler": scheduler, "step": step, "h":h}
-            fabric.save(f"model_{step}.ckpt", state)
+            fabric.save(f"checkpoints/model_{step}.ckpt", state)
 
             model = model.train()
 
