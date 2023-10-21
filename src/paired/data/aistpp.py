@@ -1,6 +1,7 @@
 import copy
 import pickle
 from pathlib import Path
+import gc
 
 import einops
 import joblib
@@ -100,7 +101,7 @@ def min_max_normalize(dataset, min_val, max_val):
         new_data = copy.deepcopy(data)
 
         x = new_data["dance"]
-        new_data["dance"] = x - min_val / (max_val - min_val)
+        new_data["dance"] = (x - min_val) / (max_val - min_val)
 
         normed.append(new_data)
 
@@ -136,8 +137,8 @@ def split_fn(data, stride: float = 0.5, length: int = 5, fps: int = 30):
     position_slices = []
 
     start_idx = 0
-    window = int(length * 60)
-    stride_step = int(stride * 60)
+    window = int(length * fps)
+    stride_step = int(stride * fps)
     slice_count = 0
     # slice until done or until matching audio slices
     while start_idx <= len(dance) - window and slice_count < num_slices:
@@ -163,14 +164,14 @@ def split_fn(data, stride: float = 0.5, length: int = 5, fps: int = 30):
 
 
 @torch.no_grad()
-def preprocess_fn(data, fps:int=30):
+def preprocess_fn(data, fps: int = 30):
     new_data = copy.deepcopy(data)
 
     dance = new_data["dance"]
 
     # convert 60fps data to 30fps
-    pose = dance["smpl_poses"][::60 // fps]
-    trans = dance["smpl_trans"][::60 // fps]
+    pose = dance["smpl_poses"][:: 60 // fps]
+    trans = dance["smpl_trans"][:: 60 // fps]
 
     # normalize translations
     trans = trans / dance["smpl_scaling"]
@@ -199,10 +200,6 @@ def preprocess_fn(data, fps:int=30):
 
     # do FK
     positions = SMPLSkeleton().forward(pose, trans)  # batch x sequence x 24 x 3
-    feet = positions[:, :, (7, 8, 10, 11)]
-    feetv = torch.zeros(feet.shape[:3])
-    feetv[:, :-1] = (feet[:, 1:] - feet[:, :-1]).norm(dim=-1)
-    (feetv < 0.01).to(pose)  # cast to right dtype
 
     # to 6d
     pose = ax_to_6v(pose)
@@ -235,8 +232,7 @@ def extract_features_fn(data):
     }
 
     S = librosa.feature.melspectrogram(
-        y=new_data["music"], sr=new_data["sample_rate"], 
-        n_fft=1024, hop_length=256
+        y=new_data["music"], sr=new_data["sample_rate"], n_fft=1024, hop_length=256
     )
     log_S = librosa.power_to_db(S, top_db=80) / 80
 
@@ -247,15 +243,15 @@ def extract_features_fn(data):
 
 def load_aistpp(root, return_all: bool = False, stride: float = 0.5, length: int = 5):
     def load_split(split):
+        gc.enable()
+
         dataset = AISTPP(root, split=split)
 
         def parallel(fn, dataset, return_as="list"):
             output = joblib.Parallel(n_jobs=-1)(
-                joblib.delayed(fn)(data)
-                for data in tqdm(dataset, dynamic_ncols=True)
+                joblib.delayed(fn)(data) for data in tqdm(dataset, dynamic_ncols=True)
             )
             return tuple(output)
-
 
         dataset = parallel(preprocess_fn, dataset)
         dataset = parallel(split_fn, dataset)

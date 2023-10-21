@@ -86,6 +86,7 @@ def simple_loss(noise: Tensor, estimated_noise: Tensor) -> Tensor:
     """
     return mse_loss(noise, estimated_noise)
 
+
 class DDPM(nn.Module):
     r"""Training and Sampling for DDPM
 
@@ -160,7 +161,7 @@ class DDPM(nn.Module):
         x_loss = simple_loss(x_noise, noise_in_x_t)
         y_loss = simple_loss(y_noise, noise_in_y_t)
 
-        total_loss = x_loss + y_loss
+        total_loss = x_loss + y_loss * 0.01
         return total_loss, {"x_loss": x_loss, "y_loss": y_loss}
 
     def sampling_step(self, x_t: Tensor, t: Tensor) -> Tensor:

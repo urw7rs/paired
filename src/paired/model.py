@@ -12,7 +12,6 @@ def pairs(channels):
     return zip(channels[:-1], channels[1:])
 
 
-
 def default_norm(num_groups, in_channels):
     return nn.GroupNorm(num_groups, in_channels)
 
@@ -32,7 +31,6 @@ def norm_act_drop_conv(in_channels, out_channels, num_groups, p):
         return nn.Sequential(norm, act, drop, conv)
     else:
         return nn.Sequential(norm, act, conv)
-
 
 
 class SinusoidalPositionEmbeddings(nn.Module):
@@ -106,6 +104,8 @@ class UpSample(nn.Module):
         """
         x = self.upsample(x)
         return self.conv(x)
+
+
 class MultiHeadAttention(nn.Module):
     r"""Self Attention with groupnorm
 
@@ -259,9 +259,7 @@ class UNet(nn.Module):
             default_act(),
         )
 
-        self.x_input_conv = nn.Conv2d(
-            x_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1
-        )
+        self.x_input_conv = nn.Conv2d(x_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1)
         self.y_input_conv = nn.Conv2d(
             y_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1
         )

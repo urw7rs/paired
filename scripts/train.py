@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import math
 import joblib
 import torch
 import wandb
@@ -22,6 +23,7 @@ def infinite(dataloader):
         for batch in dataloader:
             yield batch
 
+
 class WarmupLR(_LRScheduler):
     def __init__(self, optimizer, warmup=0.0, last_epoch=-1, verbose=False):
         self.warmup_steps = warmup
@@ -39,14 +41,25 @@ class WarmupLR(_LRScheduler):
         else:
             return [group["initial_lr"] for group in self.optimizer.param_groups]
 
-def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: int = 50, val_interval: int = 1000):
-    fabric = Fabric(accelerator="gpu", devices=1, precision="16-mixed")
-    fabric.seed_everything(h.seed)
 
-    model = UNet(x_channels=147 * 2, y_channels=1, channels_per_depth=(64, 128, 128, 128))
+def main(
+    root: str,
+    h: HyperParams,
+    gpus: int = 1,
+    ckpt_dir: str = "checkpoints",
+    log_interval: int = 50,
+    val_interval: int = 1000,
+):
+    fabric = Fabric(accelerator="gpu", devices=gpus, precision="16-mixed", strategy="ddp")
+    fabric.seed_everything(h.seed)
+    fabric.launch()
+
+    model = UNet(
+        x_channels=147 * 2, y_channels=1, channels_per_depth=(256, 512, 512, 512), attention_depths=(2, 3),
+    )
     dm = DDPM(model, h.timesteps, h.start, h.end)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=h.lr)
     scheduler = WarmupLR(optimizer, warmup=5000)
 
     dm, optimizer = fabric.setup(dm, optimizer)
@@ -68,6 +81,7 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
         shuffle=True,
         pin_memory=True,
         persistent_workers=True,
+        drop_last=True,
     )
 
     val_loader = DataLoader(
@@ -81,24 +95,32 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
 
     train_loader, val_loader = fabric.setup_dataloaders(train_loader, val_loader)
 
-    resizer = Resize(size=(32, 64), antialias=True)
-    resizer = fabric.setup_module(resizer)
+    resizer = Resize(size=(32, 32), antialias=True).to(fabric.device)
 
-    wandb.init()
+    if fabric.local_rank == 0:
+        wandb.init()
 
-    def training_step(batch):
+    def norm(x):
+        return (x - 0.5) * 2
+
+    def process_batch(batch):
         # convert to 1d wav
         dance = batch["dance"]
         batch_size = dance.shape[0]
         motion_wav = rearrange(dance, "b t c -> (b c) t")
 
-        spec = torch.stft(motion_wav, n_fft=30, hop_length=6, return_complex=True)
+        spec = torch.stft(motion_wav, n_fft=30, hop_length=30 // 4, return_complex=True)
 
         # convert to image
         spec = rearrange(spec, "(b c) f t -> b c f t", b=batch_size)
 
-        mag = spec.abs()
+        mag = torch.clamp(spec.abs(), 1e-5).log()
+
+        mag = (mag - math.log(1e-5)) / (math.log(30) - math.log(1e-5))
+        mag = norm(mag)
+
         phase = spec.angle()
+        phase /= torch.pi
 
         # batch x 147 x 16 x 51
         x = torch.cat((mag, phase), dim=1)
@@ -106,6 +128,11 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
         # batch x 1 x 128 x 431
         y = rearrange(batch["mel"].clone(), "b f t -> b 1 f t")
         y = resizer(y)
+
+        return x, y
+
+    def training_step(batch):
+        x, y = process_batch(batch)
 
         loss, parts = dm.training_step(x, y)
 
@@ -118,25 +145,7 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
 
     def val_step(batch):
         with torch.no_grad():
-            dance = batch["dance"]
-            batch_size = dance.shape[0]
-            motion_wav = rearrange(dance, "b t c -> (b c) t")
-
-            spec = torch.stft(motion_wav, n_fft=30, hop_length=6, return_complex=True)
-
-            # convert to image
-            spec = rearrange(spec, "(b c) f t -> b c f t", b=batch_size)
-
-            mag = spec.abs()
-            phase = spec.angle()
-
-            # batch x 147 x 16 x 51
-            x = torch.cat((mag, phase), dim=1)
-            x = resizer(x)
-            # batch x 1 x 128 x 431
-            y = rearrange(batch["mel"].clone(), "b f t -> b 1 f t")
-            y = resizer(y)
-
+            x, y = process_batch(batch)
             loss, parts = dm.training_step(x, y)
             return (loss, parts)
 
@@ -145,22 +154,36 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
             return
 
         loss, parts = logs
-        wandb.log({"train_loss": loss, "train_x_loss": parts["x_loss"], "train_y_loss": parts["y_loss"]}, step=step)
+        if fabric.local_rank == 0:
+            wandb.log(
+            {
+                "train_loss": loss,
+                "train_x_loss": parts["x_loss"],
+                "train_y_loss": parts["y_loss"],
+            },
+            step=step,
+        )
 
     step = 0
     logs = None
 
     ckpt_dir = Path(ckpt_dir)
-    ckpt_dir.mkdir()
+    if fabric.local_rank ==0:
+        ckpt_dir.mkdir()
 
-    for batch in tqdm(infinite(train_loader), total=h.training_steps, dynamic_ncols=True, position=0):
+    fabric.barrier()
+
+    for batch in tqdm(
+        infinite(train_loader), total=h.training_steps, dynamic_ncols=True, position=0
+    ):
         step += 1
 
         if step > h.training_steps:
             break
 
         if step % log_interval == 0:
-            logging(logs)
+            if fabric.local_rank == 0:
+                logging(logs)
 
         if step % val_interval == 0:
             model = model.eval()
@@ -176,10 +199,23 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
                 total_loss += loss
 
             n = len(val_loader)
-            wandb.log({"val_loss": total_loss, "val_x_loss": x_loss / n, "val_y_loss": y_loss / n}, step=step)
+            if fabric.local_rank == 0:
+                wandb.log(
+                {
+                    "val_loss": total_loss,
+                    "val_x_loss": x_loss / n,
+                    "val_y_loss": y_loss / n,
+                },
+                step=step,
+            )
 
-            state = {"dm": dm, "optimizer": optimizer, "scheduler": scheduler, "step": step}
             joblib.dump(h, ckpt_dir / "hparams.joblib")
+            state = {
+                "dm": dm,
+                "optimizer": optimizer,
+                "scheduler": scheduler,
+                "step": step,
+            }
             fabric.save(ckpt_dir / f"model_{step}.ckpt", state)
 
             model = model.train()
@@ -188,5 +224,5 @@ def main(root: str, h: HyperParams, ckpt_dir:str="checkpoints", log_interval: in
 
 
 if __name__ == "__main__":
-    torch.set_float32_matmul_precision('medium')
+    torch.set_float32_matmul_precision("medium")
     CLI(main, as_positional=False)

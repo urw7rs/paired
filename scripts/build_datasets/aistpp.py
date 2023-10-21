@@ -23,8 +23,9 @@ def download(root: str, verbose: bool = True):
         zip_file.extractall(root)
 
 
-def build(root:str, verbose: bool = True):
-    dataset = AISTPP(root, split=split)
+def build(root: str, verbose: bool = True):
+    AISTPP(root, split=split)
+
 
 if __name__ == "__main__":
     CLI([download], as_positional=False)

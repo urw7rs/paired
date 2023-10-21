@@ -28,7 +28,7 @@ setup(
         "lightning==2.1",
         "einops",
         "torchvision",
-        "wandb"
+        "wandb",
     ],
     extras_require={
         "test": ["pytest", "pytest-xdist"],
