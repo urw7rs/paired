@@ -1,9 +1,11 @@
 import copy
 import gc
 import pickle
+import zipfile
 from pathlib import Path
 
 import einops
+import gdown
 import joblib
 import librosa
 import torch
@@ -32,7 +34,7 @@ class AISTPP(Dataset):
       |    |- wavs
     """
 
-    def __init__(self, root: str, split: str, transforms=None):
+    def __init__(self, root: str, split: str, transforms=None, download: bool = False):
         super().__init__()
 
         self.root = Path(root)
@@ -77,6 +79,22 @@ class AISTPP(Dataset):
 
     def __len__(self):
         return len(self.motion_paths)
+
+    @staticmethod
+    def download(root: str, verbose: bool = True):
+        url = "https://drive.google.com/u/0/uc?id=16qYnN3qpmHMk2mOvOsOYNLy75xUmbyif"
+        md5 = "569a60311ecebb5001c8a7321ba787f3"
+
+        zip_path = Path(root) / "aistpp.zip"
+        try:
+            gdown.cached_download(
+                url=url, path=str(zip_path), md5=md5, quiet=not verbose, resume=False
+            )
+        except FileNotFoundError:
+            exit()
+
+        with zipfile.ZipFile(zip_path) as zip_file:
+            zip_file.extractall(root)
 
 
 def get_max_motion(dataset):
@@ -241,7 +259,9 @@ def extract_features_fn(data):
     return new_data
 
 
-def load_aistpp(root, return_all: bool = False, stride: float = 0.5, length: int = 5):
+def preprocess_aistpp(
+    root, return_all: bool = False, stride: float = 0.5, length: int = 5
+):
     def load_split(split):
         gc.enable()
 
