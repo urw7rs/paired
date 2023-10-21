@@ -1,7 +1,7 @@
 import copy
+import gc
 import pickle
 from pathlib import Path
-import gc
 
 import einops
 import joblib

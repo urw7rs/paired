@@ -9,4 +9,4 @@ class HyperParams:
     timesteps: int = 1000
     start: float = 1e-4
     end: float = 2e-2
-    lr:float=2e-4
+    lr: float = 2e-4

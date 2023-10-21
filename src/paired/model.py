@@ -259,7 +259,9 @@ class UNet(nn.Module):
             default_act(),
         )
 
-        self.x_input_conv = nn.Conv2d(x_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1)
+        self.x_input_conv = nn.Conv2d(
+            x_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1
+        )
         self.y_input_conv = nn.Conv2d(
             y_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1
         )

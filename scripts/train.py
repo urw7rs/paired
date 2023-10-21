@@ -1,6 +1,6 @@
+import math
 from pathlib import Path
 
-import math
 import joblib
 import torch
 import wandb
@@ -50,12 +50,17 @@ def main(
     log_interval: int = 50,
     val_interval: int = 1000,
 ):
-    fabric = Fabric(accelerator="gpu", devices=gpus, precision="16-mixed", strategy="ddp")
+    fabric = Fabric(
+        accelerator="gpu", devices=gpus, precision="16-mixed", strategy="ddp"
+    )
     fabric.seed_everything(h.seed)
     fabric.launch()
 
     model = UNet(
-        x_channels=147 * 2, y_channels=1, channels_per_depth=(256, 512, 512, 512), attention_depths=(2, 3),
+        x_channels=147 * 2,
+        y_channels=1,
+        channels_per_depth=(256, 512, 512, 512),
+        attention_depths=(2, 3),
     )
     dm = DDPM(model, h.timesteps, h.start, h.end)
 
@@ -156,19 +161,19 @@ def main(
         loss, parts = logs
         if fabric.local_rank == 0:
             wandb.log(
-            {
-                "train_loss": loss,
-                "train_x_loss": parts["x_loss"],
-                "train_y_loss": parts["y_loss"],
-            },
-            step=step,
-        )
+                {
+                    "train_loss": loss,
+                    "train_x_loss": parts["x_loss"],
+                    "train_y_loss": parts["y_loss"],
+                },
+                step=step,
+            )
 
     step = 0
     logs = None
 
     ckpt_dir = Path(ckpt_dir)
-    if fabric.local_rank ==0:
+    if fabric.local_rank == 0:
         ckpt_dir.mkdir()
 
     fabric.barrier()
@@ -201,13 +206,13 @@ def main(
             n = len(val_loader)
             if fabric.local_rank == 0:
                 wandb.log(
-                {
-                    "val_loss": total_loss,
-                    "val_x_loss": x_loss / n,
-                    "val_y_loss": y_loss / n,
-                },
-                step=step,
-            )
+                    {
+                        "val_loss": total_loss,
+                        "val_x_loss": x_loss / n,
+                        "val_y_loss": y_loss / n,
+                    },
+                    step=step,
+                )
 
             joblib.dump(h, ckpt_dir / "hparams.joblib")
             state = {
