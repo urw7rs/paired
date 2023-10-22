@@ -113,6 +113,7 @@ def main(
         mag = spec.abs()
         phase = spec.angle()
 
+        mag /= 30
         mag = norm(mag)
 
         phase /= torch.pi
