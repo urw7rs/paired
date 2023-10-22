@@ -117,7 +117,8 @@ class SMPLSkeleton:
         """
         Perform forward kinematics using the given trajectory and local rotations.
         Arguments (where N = batch size, L = sequence length, J = number of joints):
-         -- rotations: (N, L, J, 3) tensor of axis-angle rotations describing the local rotations of each joint.
+         -- rotations: (N, L, J, 3) tensor of axis-angle rotations describing
+                       the local rotations of each joint.
          -- root_positions: (N, L, 3) tensor describing the root joint positions.
         """
         assert len(rotations.shape) == 4

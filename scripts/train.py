@@ -1,4 +1,3 @@
-import math
 from pathlib import Path
 
 import joblib
@@ -47,8 +46,8 @@ def main(
     h: HyperParams,
     gpus: int = 1,
     ckpt_dir: str = "checkpoints",
-    log_interval: int = 50,
-    val_interval: int = 1000,
+    log_interval: int = 100,
+    val_interval: int = 10_000,
 ):
     fabric = Fabric(
         accelerator="gpu", devices=gpus, precision="16-mixed", strategy="ddp"
@@ -59,7 +58,7 @@ def main(
     model = UNet(
         x_channels=147 * 2,
         y_channels=1,
-        channels_per_depth=(256, 512, 512, 512),
+        channels_per_depth=(128, 256, 256, 256),
         attention_depths=(2, 3),
     )
     dm = DDPM(model, h.timesteps, h.start, h.end)
@@ -69,30 +68,22 @@ def main(
 
     dm, optimizer = fabric.setup(dm, optimizer)
 
-    cache_path = Path(root) / "dataset.joblib"
-
-    if cache_path.exists():
-        dataset = joblib.load(cache_path)
-    else:
-        dataset = load_aistpp(root, return_all=False, stride=0.5, length=5)
-        joblib.dump(dataset, cache_path)
-
-    data, metadata = dataset
+    dataset, metadata = load_aistpp(root, splits=["train", "val"])
 
     train_loader = DataLoader(
-        data["train"],
+        dataset["train"],
         batch_size=h.batch_size,
-        num_workers=4,
+        num_workers=16,
         shuffle=True,
         pin_memory=True,
-        persistent_workers=True,
         drop_last=True,
+        persistent_workers=True,
     )
 
     val_loader = DataLoader(
-        data["val"],
+        dataset["val"],
         batch_size=h.batch_size,
-        num_workers=4,
+        num_workers=16,
         shuffle=True,
         pin_memory=True,
         persistent_workers=True,
@@ -110,7 +101,7 @@ def main(
 
     def process_batch(batch):
         # convert to 1d wav
-        dance = batch["dance"]
+        dance = batch["poses"]
         batch_size = dance.shape[0]
         motion_wav = rearrange(dance, "b t c -> (b c) t")
 
@@ -119,12 +110,11 @@ def main(
         # convert to image
         spec = rearrange(spec, "(b c) f t -> b c f t", b=batch_size)
 
-        mag = torch.clamp(spec.abs(), 1e-5).log()
+        mag = spec.abs()
+        phase = spec.angle()
 
-        mag = (mag - math.log(1e-5)) / (math.log(30) - math.log(1e-5))
         mag = norm(mag)
 
-        phase = spec.angle()
         phase /= torch.pi
 
         # batch x 147 x 16 x 51
