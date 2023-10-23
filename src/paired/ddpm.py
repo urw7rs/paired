@@ -164,11 +164,12 @@ class DDPM(nn.Module):
         total_loss = x_loss + y_loss
         return total_loss, {"x_loss": x_loss, "y_loss": y_loss}
 
-    def sampling_step(self, x_t: Tensor, t: Tensor) -> Tensor:
+    def sampling_step(self, x_t: Tensor, y_t: Tensor, t: Tensor) -> Tensor:
         r"""Denoise image by sampling from :math:`p_\theta(x_{t-1}|x_t)`
 
         Args:
             x_t: image of shape :math:`(N, C, H, W)`
+            y_t: image of shape :math:`(N, C, H, W)`
             t: starting :math:`t` to sample from, a tensor of shape :math:`(N,)`
 
         Returns:
@@ -179,8 +180,8 @@ class DDPM(nn.Module):
         alpha_t = self.alpha[t]
         alpha_bar_t = self.alpha_bar[t]
 
-        noise_in_x_t = self.model(x_t, t)
-        p = reverse_process(
+        noise_in_x_t, noise_in_y_t = self.model(x_t, y_t, t)
+        p_x = reverse_process(
             x_t,
             beta_t,
             alpha_t,
@@ -188,13 +189,24 @@ class DDPM(nn.Module):
             noise_in_x_t,
             variance=beta_t,
         )
-        x_t = p.sample()
+        x_t = p_x.sample()
+
+        p_y = reverse_process(
+            y_t,
+            beta_t,
+            alpha_t,
+            alpha_bar_t,
+            noise_in_x_t,
+            variance=beta_t,
+        )
+        y_t = p_y.sample()
 
         # set z to 0 when t = 1 by overwriting values
-        x_t = torch.where(t == 1, p.mean, x_t)
-        return x_t
+        x_t = torch.where(t == 1, p_x.mean, x_t)
+        y_t = torch.where(t == 1, p_y.mean, y_t)
+        return x_t, y_t
 
-    def generate(self, img_size: Tuple[int, int, int, int]) -> Tensor:
+    def generate(self, img_size: Tuple[int, int, int, int], y) -> Tensor:
         """Generate image of shape :math:`(N, C, H, W)` by running the full denoising steps
 
         Args:
@@ -212,7 +224,9 @@ class DDPM(nn.Module):
         ).unsqueeze(dim=1)
 
         for t in tqdm(range(self.timesteps, 0, -1), leave=False):
-            x_t = self.sampling_step(x_t, all_t[t])
+            p_y = forward_process(y, self.alpha_bar[all_t[t]])
+            y_t = p_y.sample()
+            x_t, _ = self.sampling_step(x_t, y_t, all_t[t])
 
         return x_t
 

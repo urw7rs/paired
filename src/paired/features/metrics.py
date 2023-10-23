@@ -2,8 +2,6 @@
 import os
 
 import numpy as np
-from features.kinetic import extract_kinetic_features
-from features.manual_new import extract_manual_features
 from scipy import linalg
 
 
@@ -51,40 +49,8 @@ def quantized_metrics(predicted_pkl_root, gt_pkl_root):
 
     #   T x 24 x 3 --> 72
     # T x72 -->32
-    # print(gt_freatures_k.mean(axis=0))
-    # print(pred_features_k.mean(axis=0))
-    # print(gt_freatures_m.mean(axis=0))
-    # print(pred_features_m.mean(axis=0))
-    # print(gt_freatures_k.std(axis=0))
-    # print(pred_features_k.std(axis=0))
-    # print(gt_freatures_m.std(axis=0))
-    # print(pred_features_m.std(axis=0))
-
-    # gt_freatures_k = normalize(gt_freatures_k)
-    # gt_freatures_m = normalize(gt_freatures_m)
-    # pred_features_k = normalize(pred_features_k)
-    # pred_features_m = normalize(pred_features_m)
-
     gt_freatures_k, pred_features_k = normalize(gt_freatures_k, pred_features_k)
     gt_freatures_m, pred_features_m = normalize(gt_freatures_m, pred_features_m)
-    # # pred_features_k = normalize(pred_features_k)
-    # pred_features_m = normalize(pred_features_m)
-    # pred_features_k = normalize(pred_features_k)
-    # pred_features_m = normalize(pred_features_m)
-
-    # print(gt_freatures_k.mean(axis=0))
-    print(pred_features_k.mean(axis=0))
-    # print(gt_freatures_m.mean(axis=0))
-    print(pred_features_m.mean(axis=0))
-    # print(gt_freatures_k.std(axis=0))
-    print(pred_features_k.std(axis=0))
-    # print(gt_freatures_m.std(axis=0))
-    print(pred_features_m.std(axis=0))
-
-    # print(gt_freatures_k)
-    # print(gt_freatures_m)
-
-    print("Calculating metrics")
 
     fid_k = calc_fid(pred_features_k, gt_freatures_k)
     fid_m = calc_fid(pred_features_m, gt_freatures_m)
@@ -106,9 +72,6 @@ def quantized_metrics(predicted_pkl_root, gt_pkl_root):
 
 
 def calc_fid(kps_gen, kps_gt):
-    print(kps_gen.shape)
-    print(kps_gt.shape)
-
     # kps_gen = kps_gen[:20, :]
 
     mu_gen = np.mean(kps_gen, axis=0)
@@ -163,53 +126,3 @@ def calculate_avg_distance(feature_list, mean=None, std=None):
             dist += np.linalg.norm(feature_list[i] - feature_list[j])
     dist /= (n * n - n) / 2
     return dist
-
-
-def calc_and_save_feats(root):
-    if not os.path.exists(os.path.join(root, "kinetic_features")):
-        os.mkdir(os.path.join(root, "kinetic_features"))
-    if not os.path.exists(os.path.join(root, "manual_features_new")):
-        os.mkdir(os.path.join(root, "manual_features_new"))
-
-    # gt_list = []
-
-    for pkl in os.listdir(root):
-        print(pkl)
-        if os.path.isdir(os.path.join(root, pkl)):
-            continue
-        joint3d = np.load(os.path.join(root, pkl), allow_pickle=True).item()[
-            "pred_position"
-        ][:1200, :]
-        # print(extract_manual_features(joint3d.reshape(-1, 24, 3)))
-        roott = joint3d[:1, :3]  # the root Tx72 (Tx(24x3))
-        # print(roott)
-        joint3d = joint3d - np.tile(
-            roott, (1, 24)
-        )  # Calculate relative offset with respect to root
-        # print('==============after fix root ============')
-        # print(extract_manual_features(joint3d.reshape(-1, 24, 3)))
-        # print('==============bla============')
-        # print(extract_manual_features(joint3d.reshape(-1, 24, 3)))
-        # np_dance[:, :3] = root
-        np.save(
-            os.path.join(root, "kinetic_features", pkl),
-            extract_kinetic_features(joint3d.reshape(-1, 24, 3)),
-        )
-        np.save(
-            os.path.join(root, "manual_features_new", pkl),
-            extract_manual_features(joint3d.reshape(-1, 24, 3)),
-        )
-
-
-if __name__ == "__main__":
-    gt_root = "data/aist_features_zero_start"
-    pred_root = "experiments/actor_critic/eval/pkl/ep000010"
-
-    print("Calculating and saving features")
-    calc_and_save_feats(gt_root)
-    calc_and_save_feats(pred_root)
-
-    print("Calculating metrics")
-    print(gt_root)
-    print(pred_root)
-    print(quantized_metrics(pred_root, gt_root))

@@ -237,8 +237,8 @@ class UNet(nn.Module):
         emb_dim=512,
         num_groups=32,
         dropout=0.3,
-        channels_per_depth=(128, 256, 256, 256),
-        num_blocks=2,
+        channels_per_depth=(256, 256, 256, 256),
+        num_blocks=3,
         attention_depths=(2, 3),
     ):
         super().__init__()

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Tuple
 
 
 @dataclass
@@ -10,3 +11,4 @@ class HyperParams:
     start: float = 1e-4
     end: float = 2e-2
     lr: float = 2e-4
+    channels :Tuple[int, ...] = (512, 512, 512, 512)
