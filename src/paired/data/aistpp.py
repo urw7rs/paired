@@ -139,17 +139,28 @@ def build_aistpp(root, stride: float = 0.5, length: int = 5, fps: int = 30):
     }
 
 
-def load_aistpp(root, splits):
+memory = joblib.Memory("~/.paired")
+
+memory.cache
+
+
+def get_min_max(root, key: str = "poses"):
     train_set = DataList(Path(root) / "train")
 
     max_vals = []
     min_vals = []
     for data in train_set:
-        max_vals.append(data["poses"].max(dim=0).values)
-        min_vals.append(data["poses"].min(dim=0).values)
+        max_vals.append(data[key].max(dim=0).values)
+        min_vals.append(data[key].min(dim=0).values)
 
     train_max = torch.stack(max_vals, dim=0).max(dim=0).values
     train_min = torch.stack(min_vals, dim=0).min(dim=0).values
+
+    return train_min, train_max
+
+
+def load_aistpp(root, splits):
+    train_min, train_max = get_min_max(root)
 
     dataset = {}
     for split in splits:

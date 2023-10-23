@@ -94,6 +94,7 @@ class PostProcessing:
     @torch.no_grad()
     def __call__(self, data):
         positions = data["positions"]
+        positions -= positions[:, :1]
 
         kinetic_features = extract_kinetic_features(positions.cpu().numpy())
         manual_features = extract_manual_features(positions.cpu().numpy())

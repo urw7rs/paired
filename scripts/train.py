@@ -1,12 +1,13 @@
+import os
 from pathlib import Path
 
 import joblib
+import lightning as L
 import numpy as np
 import torch
 import wandb
 from einops import rearrange
 from jsonargparse import CLI
-from lightning.fabric import Fabric
 from torch.optim.lr_scheduler import _LRScheduler
 from torch.utils.data import DataLoader
 from torchvision.transforms import Resize
@@ -49,43 +50,69 @@ class WarmupLR(_LRScheduler):
 
 def main(
     root: str,
-    h: HyperParams,
+    h: HyperParams = None,
     gpus: int = 1,
     precision: str = "16-mixed",
     strategy: str = "auto",
     ckpt_dir: str = "checkpoints",
+    ckpt_interval: int = 500,
     log_interval: int = 100,
     val_interval: int = 10_000,
 ):
-    fabric = Fabric(
+    ckpt_dir = Path(ckpt_dir)
+
+    if ckpt_dir.exists():
+        h = joblib.load(ckpt_dir / "hparams.joblib")
+    else:
+        ckpt_dir.mkdir(parents=True)
+        joblib.dump(h, ckpt_dir / "hparams.joblib")
+
+    fabric = L.Fabric(
         accelerator="gpu",
         devices=gpus,
         precision=precision,
         strategy=strategy,
     )
+
     fabric.seed_everything(h.seed)
     fabric.launch()
 
     model = UNet(
         x_channels=147 * 2,
         y_channels=1,
-        pos_dim=256,
+        pos_dim=h.pos_dim,
+        emb_dim=h.emb_dim,
         channels_per_depth=h.channels,
-        attention_depths=(2, 3),
+        attention_depths=h.attention_depths,
     )
-    dm = DDPM(model, h.timesteps, h.start, h.end)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=h.lr)
     scheduler = WarmupLR(optimizer, warmup=5000)
 
-    dm, optimizer = fabric.setup(dm, optimizer)
+    # load from previous checkpoint if it exists
+    if (ckpt_dir / "last.ckpt").exists():
+        state = {
+            "model": model,
+            "optimizer": optimizer,
+            "scheduler": scheduler,
+        }
+        remainder = fabric.load(ckpt_dir / "last.ckpt", state)
+        step = remainder["step"]
+        best_metrics = remainder["best_metrics"]
+    else:
+        step = 0
+
+    model, optimizer = fabric.setup(model, optimizer)
+
+    dm = DDPM(model, h.timesteps, h.start, h.end)
+    dm = fabric.setup_module(dm)
 
     dataset, metadata = load_aistpp(root, splits=["train", "val"])
 
     train_loader = DataLoader(
         dataset["train"],
         batch_size=h.batch_size,
-        num_workers=16,
+        num_workers=min(16, os.cpu_count()),
         shuffle=True,
         pin_memory=True,
         drop_last=True,
@@ -95,7 +122,7 @@ def main(
     val_loader = DataLoader(
         dataset["val"],
         batch_size=h.batch_size,
-        num_workers=16,
+        num_workers=min(16, os.cpu_count()),
         shuffle=True,
         pin_memory=True,
         persistent_workers=True,
@@ -156,7 +183,6 @@ def main(
     def val_step(batch):
         with torch.no_grad():
             x, y, x_shape, y_shape = process_batch(batch)
-            loss, parts = dm.training_step(x, y)
 
             x_hat = dm.generate(x.shape, y)
             mag, phase = torch.chunk(x_hat, chunks=2, dim=1)
@@ -167,8 +193,13 @@ def main(
             real = mag * torch.cos(phase)
             imag = mag * torch.sin(phase)
 
+            resizer = Resize(x_shape[-2:], antialias=True).to(fabric.device)
+
+            real = resizer(real)
+            imag = resizer(imag)
+
             spec = torch.complex(real, imag)
-            spec = Resize(x_shape[-2:], antialias=True).to(fabric.device)(spec)
+
             spec = rearrange(spec, "b c f t -> (b c) f t")
 
             motion_wav = torch.istft(
@@ -176,13 +207,17 @@ def main(
             )
             poses = rearrange(motion_wav, "(b c) t -> b t c", b=x.shape[0])
 
+            max_val = fabric.to_device(metadata["max"])
+            min_val = fabric.to_device(metadata["min"])
+            poses = poses * (max_val - min_val) + min_val
+
             trans = poses[:, :, :3]
             pose = rearrange(poses[:, :, 3:], "n t (j c) -> n t j c", j=24)
 
             pose = ax_from_6v(pose)
             positions = skeleton.forward(pose, trans)
 
-            return loss, parts, positions
+            return positions
 
     def logging(logs):
         if logs is None:
@@ -199,28 +234,37 @@ def main(
                 step=step,
             )
 
-    step = 0
-    logs = None
-
-    ckpt_dir = Path(ckpt_dir)
-    if fabric.local_rank == 0:
-        ckpt_dir.mkdir()
-
     fabric.barrier()
 
     skeleton = SMPLSkeleton(fabric.device)
 
+    best_metrics = {
+        "fid_k": np.inf,
+        "fid_g": np.inf,
+    }
+
     for batch in tqdm(
-        infinite(train_loader), total=h.training_steps, dynamic_ncols=True, position=0
+        infinite(train_loader),
+        initial=step,
+        total=h.training_steps,
+        dynamic_ncols=True,
+        position=0,
     ):
         step += 1
 
         if step > h.training_steps:
             break
 
-        if step % log_interval == 0:
-            if fabric.local_rank == 0:
-                logging(logs)
+        if step % ckpt_interval == 0:
+            state = {
+                "model": model,
+                "optimizer": optimizer,
+                "scheduler": scheduler,
+                "step": step,
+                "best_metrics": best_metrics,
+            }
+
+            fabric.save(ckpt_dir / "last.ckpt", state)
 
         if step % val_interval == 0:
             model = model.eval()
@@ -230,15 +274,11 @@ def main(
             gt_features_k = []
             gt_features_m = []
 
-            x_loss = 0
-            y_loss = 0
-            total_loss = 0
             for batch in tqdm(val_loader, position=1, leave=False):
-                loss, parts, positions = val_step(batch)
+                positions = val_step(batch)
 
-                x_loss += parts["x_loss"]
-                y_loss += parts["y_loss"]
-                total_loss += loss
+                gt_features_k.append(batch["features"]["kinetic"].cpu().numpy())
+                gt_features_m.append(batch["features"]["geometric"].cpu().numpy())
 
                 for position in positions:
                     kinetic_features = extract_kinetic_features(position.cpu().numpy())
@@ -247,26 +287,24 @@ def main(
                     pred_features_k.append(kinetic_features)
                     pred_features_m.append(geometric_features)
 
-                gt_features_k.append(batch["features"]["kinetic"].cpu().numpy())
-                gt_features_m.append(batch["features"]["geometric"].cpu().numpy())
-
             pred_features_k = np.stack(pred_features_k)  # Nx72 p40
             pred_features_m = np.stack(pred_features_m)  # Nx32
 
             gt_features_k = np.concatenate(gt_features_k, axis=0)  # N` x 72 N` >> N
             gt_features_m = np.concatenate(gt_features_m, axis=0)  # N` x 32 N' >> N
 
-            pred_features_m = fabric.all_gather(pred_features_m).cpu().numpy()
-            pred_features_k = fabric.all_gather(pred_features_k).cpu().numpy()
+            if fabric.world_size > 1:
+                pred_features_m = fabric.all_gather(pred_features_m).cpu().numpy()
+                pred_features_k = fabric.all_gather(pred_features_k).cpu().numpy()
 
-            pred_features_m = rearrange(pred_features_m, "d n c -> (d n) c")
-            pred_features_k = rearrange(pred_features_k, "d n c -> (d n) c")
+                pred_features_m = rearrange(pred_features_m, "d n c -> (d n) c")
+                pred_features_k = rearrange(pred_features_k, "d n c -> (d n) c")
 
-            gt_features_m = fabric.all_gather(gt_features_m).cpu().numpy()
-            gt_features_k = fabric.all_gather(gt_features_k).cpu().numpy()
+                gt_features_m = fabric.all_gather(gt_features_m).cpu().numpy()
+                gt_features_k = fabric.all_gather(gt_features_k).cpu().numpy()
 
-            gt_features_m = rearrange(gt_features_m, "d n c -> (d n) c")
-            gt_features_k = rearrange(gt_features_k, "d n c -> (d n) c")
+                gt_features_m = rearrange(gt_features_m, "d n c -> (d n) c")
+                gt_features_k = rearrange(gt_features_k, "d n c -> (d n) c")
 
             gt_features_k, pred_features_k = normalize(gt_features_k, pred_features_k)
             gt_features_m, pred_features_m = normalize(gt_features_m, pred_features_m)
@@ -288,10 +326,9 @@ def main(
                 "div_g": div_g,
             }
 
-            valid_metrics = {}
             for k, v in metrics.items():
                 if not np.iscomplexobj(v):
-                    valid_metrics[k] = v
+                    metrics[k] = np.inf
 
             n = len(val_loader)
             if fabric.local_rank == 0:
@@ -300,23 +337,29 @@ def main(
                         "val_loss": total_loss,
                         "val_x_loss": x_loss / n,
                         "val_y_loss": y_loss / n,
-                        **valid_metrics,
+                        **metrics,
                     },
                     step=step,
                 )
 
-            joblib.dump(h, ckpt_dir / "hparams.joblib")
-            state = {
-                "dm": dm,
-                "optimizer": optimizer,
-                "scheduler": scheduler,
-                "step": step,
-            }
-            fabric.save(ckpt_dir / f"model_{step}.ckpt", state)
+            if metrics["fid_k"] < best_metrics["fid_k"]:
+                best_metrics = metrics
+
+                state = {
+                    "model": model,
+                    "optimizer": optimizer,
+                    "scheduler": scheduler,
+                    "step": step,
+                    "best_metrics": metrics,
+                }
+                fabric.save(ckpt_dir / "best.ckpt", state)
 
             model = model.train()
 
         model, logs = training_step(batch)
+
+        if step % log_interval == 0 and fabric.local_rank == 0:
+            logging(logs)
 
 
 if __name__ == "__main__":

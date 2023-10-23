@@ -64,7 +64,7 @@ def angle_within_range(j1, j2, k1, k2, range):
 
 
 def velocity_direction_above_threshold(
-    j1, j1_prev, j2, j2_prev, p, p_prev, threshold, time_per_frame=1 / 120.0
+    j1, j1_prev, j2, j2_prev, p, p_prev, threshold, time_per_frame=1 / 30.0
 ):
     velocity = np.array(p) - np.array(j1) - (np.array(p_prev) - np.array(j1_prev))
     direction = np.array(j2) - np.array(j1)
@@ -75,7 +75,7 @@ def velocity_direction_above_threshold(
 
 
 def velocity_direction_above_threshold_normal(
-    j1, j1_prev, j2, j3, p, p_prev, threshold, time_per_frame=1 / 120.0
+    j1, j1_prev, j2, j3, p, p_prev, threshold, time_per_frame=1 / 30.0
 ):
     velocity = np.array(p) - np.array(j1) - (np.array(p_prev) - np.array(j1_prev))
     j31 = np.array(j3) - np.array(j1)
@@ -87,7 +87,7 @@ def velocity_direction_above_threshold_normal(
     return velocity_along_direction > threshold
 
 
-def velocity_above_threshold(p, p_prev, threshold, time_per_frame=1 / 120.0):
+def velocity_above_threshold(p, p_prev, threshold, time_per_frame=1 / 30.0):
     velocity = np.linalg.norm(np.array(p) - np.array(p_prev)) / time_per_frame
     return velocity > threshold
 
