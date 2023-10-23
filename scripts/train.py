@@ -280,14 +280,13 @@ def main(
             div_g = calculate_avg_distance(pred_features_m)
 
             metrics = {
-
-                        "fid_k": fid_k,
-                        "fid_g": fid_g,
-                        "div_k_gt": div_k_gt,
-                        "div_g_gt": div_g_gt,
-                        "div_k": div_k,
-                        "div_g": div_g,
-                        }
+                "fid_k": fid_k,
+                "fid_g": fid_g,
+                "div_k_gt": div_k_gt,
+                "div_g_gt": div_g_gt,
+                "div_k": div_k,
+                "div_g": div_g,
+            }
 
             valid_metrics = {}
             for k, v in metrics.items():
