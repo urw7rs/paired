@@ -204,6 +204,10 @@ class DDPM(nn.Module):
         # set z to 0 when t = 1 by overwriting values
         x_t = torch.where(t == 1, p_x.mean, x_t)
         y_t = torch.where(t == 1, p_y.mean, y_t)
+
+        x_t = torch.clamp(x_t, min=-1, max=1)
+        x_t = torch.clamp(x_t, min=-1, max=1)
+
         return x_t, y_t
 
     def generate(self, img_size: Tuple[int, int, int, int], y) -> Tensor:
