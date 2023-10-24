@@ -122,7 +122,5 @@ def calculate_avg_distance(feature_list, mean=None, std=None):
         feature_list = (feature_list - mean) / std
     dist = 0
     for i in range(n):
-        for j in range(i + 1, n):
-            dist += np.linalg.norm(feature_list[i] - feature_list[j])
-    dist /= (n * n - n) / 2
-    return dist
+        dist += np.linalg.norm(feature_list[i:i+1] - feature_list[i+1:], axis=-1).sum()
+    return dist / (n * (n -1 ) / 2)

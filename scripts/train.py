@@ -89,6 +89,11 @@ def main(
     optimizer = torch.optim.Adam(model.parameters(), lr=h.lr)
     scheduler = WarmupLR(optimizer, warmup=5000)
 
+    model, optimizer = fabric.setup(model, optimizer)
+
+    dm = DDPM(model, h.timesteps, h.start, h.end)
+    dm = fabric.setup_module(dm)
+
     # load from previous checkpoint if it exists
     if (ckpt_dir / "last.ckpt").exists():
         state = {
@@ -102,10 +107,6 @@ def main(
     else:
         step = 0
 
-    model, optimizer = fabric.setup(model, optimizer)
-
-    dm = DDPM(model, h.timesteps, h.start, h.end)
-    dm = fabric.setup_module(dm)
 
     dataset, metadata = load_aistpp(root, splits=["train", "val"])
 
@@ -234,14 +235,29 @@ def main(
                 step=step,
             )
 
-    fabric.barrier()
-
     skeleton = SMPLSkeleton(fabric.device)
 
     best_metrics = {
         "fid_k": np.inf,
         "fid_g": np.inf,
     }
+
+    gt_features_k = []
+    gt_features_m = []
+    for batch in tqdm(train_loader, dynamic_ncols=True):
+        gt_features_k.append(batch["features"]["kinetic"].cpu().numpy())
+        gt_features_m.append(batch["features"]["geometric"].cpu().numpy())
+
+    gt_features_k = np.concatenate(gt_features_k, axis=0)  # N` x 72 N` >> N
+    gt_features_m = np.concatenate(gt_features_m, axis=0)  # N` x 32 N' >> N
+
+    if fabric.world_size > 1:
+        gt_features_m = fabric.all_gather(gt_features_m).cpu().numpy()
+        gt_features_k = fabric.all_gather(gt_features_k).cpu().numpy()
+
+        gt_features_m = rearrange(gt_features_m, "d n c -> (d n) c")
+        gt_features_k = rearrange(gt_features_k, "d n c -> (d n) c")
+
 
     for batch in tqdm(
         infinite(train_loader),
@@ -271,16 +287,11 @@ def main(
 
             pred_features_k = []
             pred_features_m = []
-            gt_features_k = []
-            gt_features_m = []
 
             for batch in tqdm(val_loader, position=1, leave=False):
                 positions = val_step(batch)
 
-                gt_features_k.append(batch["features"]["kinetic"].cpu().numpy())
-                gt_features_m.append(batch["features"]["geometric"].cpu().numpy())
-
-                for position in positions:
+                for position in tqdm(positions, dynamic_ncols=True, position=1, leave=False):
                     kinetic_features = extract_kinetic_features(position.cpu().numpy())
                     geometric_features = extract_manual_features(position.cpu().numpy())
 
@@ -290,9 +301,6 @@ def main(
             pred_features_k = np.stack(pred_features_k)  # Nx72 p40
             pred_features_m = np.stack(pred_features_m)  # Nx32
 
-            gt_features_k = np.concatenate(gt_features_k, axis=0)  # N` x 72 N` >> N
-            gt_features_m = np.concatenate(gt_features_m, axis=0)  # N` x 32 N' >> N
-
             if fabric.world_size > 1:
                 pred_features_m = fabric.all_gather(pred_features_m).cpu().numpy()
                 pred_features_k = fabric.all_gather(pred_features_k).cpu().numpy()
@@ -300,20 +308,15 @@ def main(
                 pred_features_m = rearrange(pred_features_m, "d n c -> (d n) c")
                 pred_features_k = rearrange(pred_features_k, "d n c -> (d n) c")
 
-                gt_features_m = fabric.all_gather(gt_features_m).cpu().numpy()
-                gt_features_k = fabric.all_gather(gt_features_k).cpu().numpy()
+            norm_gt_features_k, pred_features_k = normalize(gt_features_k, pred_features_k)
+            norm_gt_features_m, pred_features_m = normalize(gt_features_m, pred_features_m)
 
-                gt_features_m = rearrange(gt_features_m, "d n c -> (d n) c")
-                gt_features_k = rearrange(gt_features_k, "d n c -> (d n) c")
+            fid_k = calc_fid(pred_features_k, norm_gt_features_k)
+            fid_g = calc_fid(pred_features_m, norm_gt_features_m)
 
-            gt_features_k, pred_features_k = normalize(gt_features_k, pred_features_k)
-            gt_features_m, pred_features_m = normalize(gt_features_m, pred_features_m)
+            div_k_gt = calculate_avg_distance(norm_gt_features_k)
+            div_g_gt = calculate_avg_distance(norm_gt_features_m)
 
-            fid_k = calc_fid(pred_features_k, gt_features_k)
-            fid_g = calc_fid(pred_features_m, gt_features_m)
-
-            div_k_gt = calculate_avg_distance(gt_features_k)
-            div_g_gt = calculate_avg_distance(gt_features_m)
             div_k = calculate_avg_distance(pred_features_k)
             div_g = calculate_avg_distance(pred_features_m)
 
@@ -327,18 +330,12 @@ def main(
             }
 
             for k, v in metrics.items():
-                if not np.iscomplexobj(v):
+                if np.iscomplexobj(v):
                     metrics[k] = np.inf
 
-            n = len(val_loader)
             if fabric.local_rank == 0:
                 wandb.log(
-                    {
-                        "val_loss": total_loss,
-                        "val_x_loss": x_loss / n,
-                        "val_y_loss": y_loss / n,
-                        **metrics,
-                    },
+                        metrics,
                     step=step,
                 )
 
