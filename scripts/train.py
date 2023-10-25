@@ -84,7 +84,8 @@ def main(
         emb_dim=h.emb_dim,
         channels_per_depth=h.channels,
         attention_depths=h.attention_depths,
-        dropout=h.dropout, num_blocks=h.num_blocks,
+        dropout=h.dropout,
+        num_blocks=h.num_blocks,
         num_groups=h.num_groups,
     )
 
@@ -108,7 +109,6 @@ def main(
         best_metrics = remainder["best_metrics"]
     else:
         step = 0
-
 
     dataset, metadata = load_aistpp(root, splits=["train", "val"])
 
@@ -260,7 +260,6 @@ def main(
         gt_features_m = rearrange(gt_features_m, "d n c -> (d n) c")
         gt_features_k = rearrange(gt_features_k, "d n c -> (d n) c")
 
-
     for batch in tqdm(
         infinite(train_loader),
         initial=step,
@@ -293,7 +292,9 @@ def main(
             for batch in tqdm(val_loader, position=1, leave=False):
                 positions = val_step(batch)
 
-                for position in tqdm(positions, dynamic_ncols=True, position=1, leave=False):
+                for position in tqdm(
+                    positions, dynamic_ncols=True, position=1, leave=False
+                ):
                     kinetic_features = extract_kinetic_features(position.cpu().numpy())
                     geometric_features = extract_manual_features(position.cpu().numpy())
 
@@ -310,8 +311,12 @@ def main(
                 pred_features_m = rearrange(pred_features_m, "d n c -> (d n) c")
                 pred_features_k = rearrange(pred_features_k, "d n c -> (d n) c")
 
-            norm_gt_features_k, pred_features_k = normalize(gt_features_k, pred_features_k)
-            norm_gt_features_m, pred_features_m = normalize(gt_features_m, pred_features_m)
+            norm_gt_features_k, pred_features_k = normalize(
+                gt_features_k, pred_features_k
+            )
+            norm_gt_features_m, pred_features_m = normalize(
+                gt_features_m, pred_features_m
+            )
 
             fid_k = calc_fid(pred_features_k, norm_gt_features_k)
             fid_g = calc_fid(pred_features_m, norm_gt_features_m)
@@ -337,7 +342,7 @@ def main(
 
             if fabric.local_rank == 0:
                 wandb.log(
-                        metrics,
+                    metrics,
                     step=step,
                 )
 

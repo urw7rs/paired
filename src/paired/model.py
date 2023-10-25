@@ -260,7 +260,7 @@ class UNet(nn.Module):
         )
 
         self.input_conv = nn.Conv2d(
-            x_channels + y_channels, channels[0] , kernel_size=3, stride=1, padding=1
+            x_channels + y_channels, channels[0], kernel_size=3, stride=1, padding=1
         )
 
         default_resblock = functools.partial(
@@ -362,5 +362,7 @@ class UNet(nn.Module):
                 x = f(x)
 
         x = self.output_conv(x)
-        x, y = torch.split(x, split_size_or_sections=(self.x_channels, self.y_channels), dim=1)
+        x, y = torch.split(
+            x, split_size_or_sections=(self.x_channels, self.y_channels), dim=1
+        )
         return x, y

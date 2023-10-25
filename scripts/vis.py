@@ -1,6 +1,5 @@
 import os
 from pathlib import Path
-import joblib
 
 import joblib
 import lightning as L
@@ -9,17 +8,23 @@ from einops import rearrange
 from jsonargparse import CLI
 from torch.utils.data import DataLoader
 from torchvision.transforms import Resize
-from tqdm import tqdm
 
-from paired.data.vis import plot_skeleton
 from paired.data.aistpp import load_aistpp
 from paired.data.quaternion import ax_from_6v
 from paired.data.skeleton import SMPLSkeleton
+from paired.data.vis import plot_skeleton
 from paired.ddpm import DDPM
 from paired.model import UNet
 
 
-def vis(root:str, ckpt_dir:str, gif_dir: str, gpus:int = 1, precision:str="16-mixed", strategy:str="auto"):
+def vis(
+    root: str,
+    ckpt_dir: str,
+    gif_dir: str,
+    gpus: int = 1,
+    precision: str = "16-mixed",
+    strategy: str = "auto",
+):
     ckpt_dir = Path(ckpt_dir)
     h = joblib.load(ckpt_dir / "hparams.joblib")
 
@@ -43,9 +48,7 @@ def vis(root:str, ckpt_dir:str, gif_dir: str, gpus:int = 1, precision:str="16-mi
     )
 
     ckpt_path = ckpt_dir / "best.ckpt"
-    state = {
-        "model": model
-    }
+    state = {"model": model}
     fabric.load(ckpt_path, state)
 
     dm = DDPM(model, h.timesteps, h.start, h.end)
@@ -119,7 +122,7 @@ def vis(root:str, ckpt_dir:str, gif_dir: str, gpus:int = 1, precision:str="16-mi
             x, y, x_shape, y_shape = process_batch(batch)
 
             x_hat = dm.generate(x.shape, y)
-            #x_hat = x
+            # x_hat = x
 
             resizer = Resize(x_shape[-2:], antialias=True).to(fabric.device)
             x_hat = resizer(x_hat)
@@ -152,13 +155,14 @@ def vis(root:str, ckpt_dir:str, gif_dir: str, gpus:int = 1, precision:str="16-mi
             pose = ax_from_6v(pose)
             positions = skeleton.forward(pose, trans).cpu().numpy()
             positions -= positions[:, :1, :1]
-            
-            joblib.Parallel(
-                    n_jobs=-1)(joblib.delayed(plot_skeleton)
-                                                      (gif_dir / f"{i}.gif", position, fps=30)
-                                                      for i, position in enumerate(positions))
+
+            joblib.Parallel(n_jobs=-1)(
+                joblib.delayed(plot_skeleton)(gif_dir / f"{i}.gif", position, fps=30)
+                for i, position in enumerate(positions)
+            )
 
         break
+
 
 if __name__ == "__main__":
     torch.set_float32_matmul_precision("medium")

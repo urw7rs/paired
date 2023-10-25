@@ -17,6 +17,6 @@ class HyperParams:
     attention_depths: Tuple[int, ...] = (2, 3)
     x_channels: int = 147 * 2
     y_channels: int = 1
-    dropout:float = 0.3
-    num_blocks:int = 3
+    dropout: float = 0.3
+    num_blocks: int = 3
     num_groups: int = 32
