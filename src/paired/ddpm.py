@@ -206,7 +206,7 @@ class DDPM(nn.Module):
         y_t = torch.where(t == 1, p_y.mean, y_t)
 
         x_t = torch.clamp(x_t, min=-1, max=1)
-        x_t = torch.clamp(x_t, min=-1, max=1)
+        y_t = torch.clamp(y_t, min=-1, max=1)
 
         return x_t, y_t
 

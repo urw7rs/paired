@@ -78,12 +78,14 @@ def main(
     fabric.launch()
 
     model = UNet(
-        x_channels=147 * 2,
-        y_channels=1,
+        x_channels=h.x_channels,
+        y_channels=h.y_channels,
         pos_dim=h.pos_dim,
         emb_dim=h.emb_dim,
         channels_per_depth=h.channels,
         attention_depths=h.attention_depths,
+        dropout=h.dropout, num_blocks=h.num_blocks,
+        num_groups=h.num_groups,
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=h.lr)

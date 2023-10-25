@@ -211,7 +211,7 @@ class ResBlock(nn.Module):
         h = self.norm(h) * (scale + 1) + shift
         h = self.conv2(h)
         h += self.residual(x)
-        h = self.attention(h)
+        h = torch.utils.checkpoint.checkpoint(self.attention, h)
         return h
 
 
@@ -259,11 +259,8 @@ class UNet(nn.Module):
             default_act(),
         )
 
-        self.x_input_conv = nn.Conv2d(
-            x_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1
-        )
-        self.y_input_conv = nn.Conv2d(
-            y_channels, channels[0] // 2, kernel_size=3, stride=1, padding=1
+        self.input_conv = nn.Conv2d(
+            x_channels + y_channels, channels[0] , kernel_size=3, stride=1, padding=1
         )
 
         default_resblock = functools.partial(
@@ -320,13 +317,12 @@ class UNet(nn.Module):
             ]
         )
 
-        self.x_output_conv = norm_act_drop_conv(
-            channels[0], x_channels, num_groups, p=0.0
+        self.output_conv = norm_act_drop_conv(
+            channels[0], x_channels + y_channels, num_groups, p=0.0
         )
 
-        self.y_output_conv = norm_act_drop_conv(
-            channels[0], y_channels, num_groups, p=0.0
-        )
+        self.x_channels = x_channels
+        self.y_channels = y_channels
 
     def forward(self, x, y, c):
         r"""Predicts noise from x
@@ -341,10 +337,9 @@ class UNet(nn.Module):
         """
         t = self.condition(c)
 
-        x = self.x_input_conv(x)
-        y = self.y_input_conv(y)
-
         x = torch.cat((x, y), dim=1)
+
+        x = self.input_conv(x)
 
         outputs = [x]
 
@@ -366,6 +361,6 @@ class UNet(nn.Module):
             else:
                 x = f(x)
 
-        y = self.y_output_conv(x)
-        x = self.x_output_conv(x)
+        x = self.output_conv(x)
+        x, y = torch.split(x, split_size_or_sections=(self.x_channels, self.y_channels), dim=1)
         return x, y

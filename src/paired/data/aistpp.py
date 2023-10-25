@@ -166,7 +166,7 @@ def load_aistpp(root, splits):
     for split in splits:
         dataset[split] = DataList(
             Path(root) / split,
-            transforms=transforms.MinMaxNormalize(train_max, train_min),
+            transforms=transforms.MinMaxNormalize(train_min, train_max),
         )
 
     metadata = {"max": train_max, "min": train_min}
