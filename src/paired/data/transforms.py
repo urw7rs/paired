@@ -87,9 +87,10 @@ class MinMaxNormalize:
 
 
 class PostProcessing:
-    def __init__(self, n_fft: int = 1024, hop_length: int = 256):
+    def __init__(self, n_fft: int = 1024, hop_length: int = 256, num_mels: int = 80):
         self.n_fft = n_fft
         self.hop_length = hop_length
+        self.num_mels = num_mels
 
     @torch.no_grad()
     def __call__(self, data):
@@ -111,6 +112,7 @@ class PostProcessing:
             sr=data["sample_rate"],
             n_fft=self.n_fft,
             hop_length=self.hop_length,
+            n_mels=self.num_mels,
         )
         log_S = librosa.power_to_db(S, top_db=80) / 80
 
@@ -120,7 +122,7 @@ class PostProcessing:
 
 
 class SliceClips:
-    def __init__(self, stride: float = 0.5, length: int = 5, fps: int = 30):
+    def __init__(self, stride: float = 0.5, length: float = 5, fps: int = 30):
         self.stride = stride
         self.length = length
         self.fps = fps

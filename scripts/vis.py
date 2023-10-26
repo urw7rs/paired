@@ -1,13 +1,15 @@
+import math
 import os
 from pathlib import Path
 
 import joblib
 import lightning as L
 import torch
+import torchvision.transforms.functional as TF
 from einops import rearrange
 from jsonargparse import CLI
 from torch.utils.data import DataLoader
-from torchvision.transforms import Resize
+from torchvision.transforms import InterpolationMode
 
 from paired.data.aistpp import load_aistpp
 from paired.data.quaternion import ax_from_6v
@@ -47,7 +49,7 @@ def vis(
         attention_depths=h.attention_depths,
     )
 
-    ckpt_path = ckpt_dir / "best.ckpt"
+    ckpt_path = ckpt_dir / "last.ckpt"
     state = {"model": model}
     fabric.load(ckpt_path, state)
 
@@ -77,10 +79,18 @@ def vis(
 
     train_loader, val_loader = fabric.setup_dataloaders(train_loader, val_loader)
 
-    resizer = Resize(size=(32, 32), antialias=True).to(fabric.device)
-
     def norm(x):
         return (x - 0.5) * 2
+
+    def power_to_db(S, amin: float = 1e-10, top_db=None):
+        log_spec = torch.log(torch.clamp(S, min=amin))
+        log_spec -= math.log(amin)
+
+        return log_spec
+
+    def db_to_power(S_db, amin=1e-10):
+        S_db += math.log(amin)
+        return torch.exp(S_db)
 
     def process_batch(batch):
         # convert to 1d wav
@@ -88,48 +98,56 @@ def vis(
         batch_size = dance.shape[0]
         motion_wav = rearrange(dance, "b t c -> (b c) t")
 
-        spec = torch.stft(motion_wav, n_fft=30, hop_length=30 // 4, return_complex=True)
+        spec = torch.stft(motion_wav, n_fft=60, hop_length=60 // 4, return_complex=True)
 
         # convert to image
         spec = rearrange(spec, "(b c) f t -> b c f t", b=batch_size)
 
-        mag = spec.abs()
+        mag = spec.abs() ** 2
         phase = spec.angle()
 
-        mag /= 30
-        mag = norm(mag)
+        S_db = power_to_db(mag) / (math.log(3600) - math.log(1e-10))
+        mag = norm(S_db)
 
         phase /= torch.pi
 
-        # batch x 147 x 16 x 51
+        # batch x 147 x 31 x 32
         x = torch.cat((mag, phase), dim=1)
-        x_shape = x.shape
-        x = resizer(x)
-        # batch x 1 x 128 x 431
-        y = rearrange(batch["mel"].clone(), "b f t -> b 1 f t")
-        y_shape = y.shape
-        y = resizer(y)
+        # batch x 294 x 32 x 32
+        x = torch.nn.functional.pad(x, (0, 0, 0, 1), value=0)
 
-        return x, y, x_shape, y_shape
+        # batch x 1 x 128 x 431
+        y = rearrange(batch["mel"], "b f t -> b 1 f t")
+        y = TF.resize(
+            y, size=(32, 32), antialias=True, interpolation=InterpolationMode.NEAREST
+        )
+        y_shape = y.shape
+
+        return x, y, y_shape
 
     skeleton = SMPLSkeleton(fabric.device)
 
     gif_dir = Path(gif_dir)
     gif_dir.mkdir()
 
+    def visualize(name, position, mag, phase):
+        plot_skeleton(name + ".gif", position, fps=30)
+
     for batch in train_loader:
         with torch.no_grad():
-            x, y, x_shape, y_shape = process_batch(batch)
+            x, y, y_shape = process_batch(batch)
 
             x_hat = dm.generate(x.shape, y)
             # x_hat = x
 
-            resizer = Resize(x_shape[-2:], antialias=True).to(fabric.device)
-            x_hat = resizer(x_hat)
+            x_hat = x_hat[:, :, :31]
 
             mag, phase = torch.chunk(x_hat, chunks=2, dim=1)
             mag = mag / 2 + 0.5
-            mag *= 30
+
+            mag = db_to_power(mag * (math.log(3600) - math.log(1e-10)))
+            mag = mag**0.5
+
             phase *= torch.pi
 
             real = mag * torch.cos(phase)
@@ -140,20 +158,21 @@ def vis(
             spec = rearrange(spec, "b c f t -> (b c) f t")
 
             motion_wav = torch.istft(
-                spec, n_fft=30, hop_length=30 // 4, length=batch["poses"].shape[1]
+                spec, n_fft=60, hop_length=60 // 4, length=batch["poses"].shape[1]
             )
             poses = rearrange(motion_wav, "(b c) t -> b t c", b=x.shape[0])
 
             max_val = fabric.to_device(metadata["max"])
             min_val = fabric.to_device(metadata["min"])
 
-            poses = poses * (min_val - max_val) + max_val
+            poses = poses * (max_val - min_val) + min_val
 
             trans = poses[:, :, :3]
             pose = rearrange(poses[:, :, 3:], "n t (j c) -> n t j c", j=24)
 
             pose = ax_from_6v(pose)
             positions = skeleton.forward(pose, trans).cpu().numpy()
+
             positions -= positions[:, :1, :1]
 
             joblib.Parallel(n_jobs=-1)(

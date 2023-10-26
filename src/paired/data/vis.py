@@ -113,3 +113,8 @@ def plot_skeleton(gifname, poses, contact=None, fps: int = 60):
         gifname, savefig_kwargs={"transparent": True, "facecolor": "none"}, fps=fps
     )
     plt.close()
+
+
+def plot_spectrogram(name, mag, phase):
+    fig, axs = plt.subplots(1, 2)
+    axs[0].pcolormesh(mag)

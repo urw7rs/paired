@@ -87,7 +87,7 @@ class AISTPP(Dataset):
             zip_file.extractall(root)
 
 
-def build_aistpp(root, stride: float = 0.5, length: int = 5, fps: int = 30):
+def build_aistpp(root, stride: float = 0.5, length: float = 7.75, fps: int = 60):
     def process_split(split):
         dataset = AISTPP(
             root,
@@ -139,17 +139,10 @@ def build_aistpp(root, stride: float = 0.5, length: int = 5, fps: int = 30):
     }
 
 
-memory = joblib.Memory("~/.paired")
-
-memory.cache
-
-
-def get_min_max(root, key: str = "poses"):
-    train_set = DataList(Path(root) / "train")
-
+def get_min_max(dataset, key: str = "poses"):
     max_vals = []
     min_vals = []
-    for data in train_set:
+    for data in dataset:
         max_vals.append(data[key].max(dim=0).values)
         min_vals.append(data[key].min(dim=0).values)
 
@@ -159,8 +152,12 @@ def get_min_max(root, key: str = "poses"):
     return train_min, train_max
 
 
+memory = joblib.Memory("~/.paired", verbose=0)
+
+
 def load_aistpp(root, splits):
-    train_min, train_max = get_min_max(root)
+    train_set = DataList(Path(root) / "train")
+    train_min, train_max = memory.cache(get_min_max)(train_set, key="poses")
 
     dataset = {}
     for split in splits:

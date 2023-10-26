@@ -206,12 +206,12 @@ class ResBlock(nn.Module):
             (torch.Tensor): feature map of shape :math:`(N, C_\text{out}, H, W)`
         """
 
-        h = self.conv1(x)
+        h = torch.utils.checkpoint.checkpoint(self.conv1, x, use_reentrant=False)
         shift, scale = self.condition(c).chunk(2, dim=1)
         h = self.norm(h) * (scale + 1) + shift
         h = self.conv2(h)
         h += self.residual(x)
-        h = torch.utils.checkpoint.checkpoint(self.attention, h)
+        h = torch.utils.checkpoint.checkpoint(self.attention, h, use_reentrant=False)
         return h
 
 

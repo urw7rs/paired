@@ -196,7 +196,7 @@ class DDPM(nn.Module):
             beta_t,
             alpha_t,
             alpha_bar_t,
-            noise_in_x_t,
+            noise_in_y_t,
             variance=beta_t,
         )
         y_t = p_y.sample()
