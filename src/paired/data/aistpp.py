@@ -6,12 +6,28 @@ import gdown
 import joblib
 import librosa
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Subset
 from torchvision.transforms import Compose
 from tqdm.auto import tqdm
 
 from . import transforms
 from .data_list import DataList
+
+
+def download_aistpp(root: str, verbose: bool = True):
+    url = "https://drive.google.com/u/0/uc?id=16qYnN3qpmHMk2mOvOsOYNLy75xUmbyif"
+    md5 = "569a60311ecebb5001c8a7321ba787f3"
+
+    zip_path = Path(root) / "aistpp.zip"
+    try:
+        gdown.cached_download(
+            url=url, path=str(zip_path), md5=md5, quiet=not verbose, resume=False
+        )
+    except FileNotFoundError:
+        exit()
+
+    with zipfile.ZipFile(zip_path) as zip_file:
+        zip_file.extractall(root)
 
 
 class AISTPP(Dataset):
@@ -31,7 +47,12 @@ class AISTPP(Dataset):
         self.split = split
 
         # load splits
-        names = (self.root / f"splits/crossmodal_{split}.txt").read_text().split("\n")
+        if split == "all":
+            names = (self.root / "splits/all.txt").read_text().split("\n")
+        else:
+            names = (
+                (self.root / f"splits/crossmodal_{split}.txt").read_text().split("\n")
+            )
 
         # filter names in ignore_list.txt
         lines = (self.root / "ignore_list.txt").read_text().split("\n")
@@ -69,22 +90,6 @@ class AISTPP(Dataset):
 
     def __len__(self):
         return len(self.motion_paths)
-
-    @staticmethod
-    def download(root: str, verbose: bool = True):
-        url = "https://drive.google.com/u/0/uc?id=16qYnN3qpmHMk2mOvOsOYNLy75xUmbyif"
-        md5 = "569a60311ecebb5001c8a7321ba787f3"
-
-        zip_path = Path(root) / "aistpp.zip"
-        try:
-            gdown.cached_download(
-                url=url, path=str(zip_path), md5=md5, quiet=not verbose, resume=False
-            )
-        except FileNotFoundError:
-            exit()
-
-        with zipfile.ZipFile(zip_path) as zip_file:
-            zip_file.extractall(root)
 
 
 def build_aistpp(root, stride: float = 0.5, length: float = 7.75, fps: int = 60):
@@ -155,16 +160,21 @@ def get_min_max(dataset, key: str = "poses"):
 memory = joblib.Memory("~/.paired", verbose=0)
 
 
-def load_aistpp(root, splits):
+def load_aistpp(root, splits, subset_size: int = -1):
     train_set = DataList(Path(root) / "train")
     train_min, train_max = memory.cache(get_min_max)(train_set, key="poses")
 
     dataset = {}
     for split in splits:
-        dataset[split] = DataList(
+        full_data = DataList(
             Path(root) / split,
             transforms=transforms.MinMaxNormalize(train_min, train_max),
         )
+
+        if subset_size != -1:
+            dataset[split] = Subset(full_data, indices=list(range(0, subset_size)))
+        else:
+            dataset[split] = full_data
 
     metadata = {"max": train_max, "min": train_min}
 
