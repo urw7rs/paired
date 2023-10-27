@@ -111,7 +111,7 @@ class Dataset(torch.utils.data.Dataset):
         return data
 
     def __len__(self):
-        return len(self.motion_paths)
+        return len(self.path_pairs)
 
 
 def build_aistpp(root, stride: float = 0.5, length: float = 7.75, fps: int = 60):
