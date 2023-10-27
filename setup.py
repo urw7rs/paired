@@ -29,6 +29,7 @@ setup(
         "einops",
         "torchvision",
         "wandb",
+        "einops",
     ],
     extras_require={
         "test": ["pytest", "pytest-xdist"],
