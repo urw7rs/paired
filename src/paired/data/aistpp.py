@@ -5,8 +5,8 @@ from pathlib import Path
 import gdown
 import joblib
 import librosa
+import numpy as np
 import torch
-from torch.utils.data import Dataset, Subset
 from torchvision.transforms import Compose
 from tqdm.auto import tqdm
 
@@ -14,7 +14,7 @@ from . import transforms
 from .data_list import DataList
 
 
-def download_aistpp(root: str, verbose: bool = True):
+def download(root: str, verbose: bool = True):
     url = "https://drive.google.com/u/0/uc?id=16qYnN3qpmHMk2mOvOsOYNLy75xUmbyif"
     md5 = "569a60311ecebb5001c8a7321ba787f3"
 
@@ -30,7 +30,28 @@ def download_aistpp(root: str, verbose: bool = True):
         zip_file.extractall(root)
 
 
-class AISTPP(Dataset):
+def load_dance(path: str) -> dict[str, np.ndarray]:
+    with open(path, "rb") as f:
+        dance = pickle.load(f)
+
+    return dance
+
+
+def load_music(path: str, **kwargs) -> tuple[np.ndarray, int]:
+    y, sr = librosa.load(path, **kwargs)
+    return y, sr
+
+
+def load_names(root: Path, split: str):
+    if split == "all":
+        names = (root / "splits/all.txt").read_text().split("\n")
+    else:
+        names = (root / f"splits/crossmodal_{split}.txt").read_text().split("\n")
+
+    return names
+
+
+class Dataset(torch.utils.data.Dataset):
     """Load AIST++ dataset into a dictionary
 
     Structure:
@@ -40,13 +61,12 @@ class AISTPP(Dataset):
       |    |- wavs
     """
 
-    def __init__(self, root: str, split: str, transforms=None, download: bool = False):
+    def __init__(self, root: str, split: str, transforms=None):
         super().__init__()
 
         self.root = Path(root)
-        self.split = split
 
-        # load splits
+        # read split files and load names
         if split == "all":
             names = (self.root / "splits/all.txt").read_text().split("\n")
         else:
@@ -70,16 +90,18 @@ class AISTPP(Dataset):
             wav_paths.append(self.root / f"wavs/{name}.wav")
 
         # sort motions and sounds
-        self.motion_paths = sorted(motion_paths)
-        self.wav_paths = sorted(wav_paths)
+        path_pairs = zip(motion_paths, wav_paths)
+        self.path_pairs = sorted(path_pairs)
 
         self.transforms = transforms
 
     def __getitem__(self, index):
-        with open(self.motion_paths[index], "rb") as f:
-            dance = pickle.load(f)
+        motion_path, wav_path = self.path_pairs[index]
 
-        y, sr = librosa.load(self.wav_paths[index])
+        assert motion_path.with_suffix("").name == wav_path.with_suffix("").name
+
+        dance = load_dance(motion_path)
+        y, sr = load_music(wav_path)
 
         data = {"dance": dance, "music": y, "sample_rate": sr}
 
