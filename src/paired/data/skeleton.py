@@ -1,39 +1,6 @@
 import numpy as np
-import torch
+from scipy.spatial.transform import Rotation as R
 
-from ..pytorch3d.transforms import (
-    axis_angle_to_quaternion,
-    quaternion_apply,
-    quaternion_multiply,
-)
-
-
-smpl_joints = [
-    "root",  # 0
-    "lhip",  # 1
-    "rhip",  # 2
-    "belly",  # 3
-    "lknee",  # 4
-    "rknee",  # 5
-    "spine",  # 6
-    "lankle",  # 7
-    "rankle",  # 8
-    "chest",  # 9
-    "ltoes",  # 10
-    "rtoes",  # 11
-    "neck",  # 12
-    "linshoulder",  # 13
-    "rinshoulder",  # 14
-    "head",  # 15
-    "lshoulder",  # 16
-    "rshoulder",  # 17
-    "lelbow",  # 18
-    "relbow",  # 19
-    "lwrist",  # 20
-    "rwrist",  # 21
-    "lhand",  # 22
-    "rhand",  # 23
-]
 
 smpl_parents = [
     -1,
@@ -89,73 +56,44 @@ smpl_offsets = [
     [-0.0887537, -0.00865157, -0.01010708],
 ]
 
+offsets = np.array(smpl_offsets)
+parents = np.array(smpl_parents)
 
-class SMPLSkeleton:
-    def __init__(self, device=None):
-        offsets = smpl_offsets
-        parents = smpl_parents
-        assert len(offsets) == len(parents)
+has_children = np.zeros(len(parents)).astype(bool)
+for parent in parents:
+    if parent != -1:
+        has_children[parent] = True
 
-        self._offsets = torch.Tensor(offsets).to(device)
-        self._parents = np.array(parents)
-        self._compute_metadata()
+children = [[] for _ in range(len(parents))]
 
-    def _compute_metadata(self):
-        self._has_children = np.zeros(len(self._parents)).astype(bool)
-        for i, parent in enumerate(self._parents):
-            if parent != -1:
-                self._has_children[parent] = True
+for i, parent in enumerate(parents):
+    if parent != -1:
+        children[parent].append(i)
 
-        self._children = []
-        for i, parent in enumerate(self._parents):
-            self._children.append([])
-        for i, parent in enumerate(self._parents):
-            if parent != -1:
-                self._children[parent].append(i)
 
-    def forward(self, rotations, root_positions):
-        """
-        Perform forward kinematics using the given trajectory and local rotations.
-        Arguments (where N = batch size, L = sequence length, J = number of joints):
-         -- rotations: (N, L, J, 3) tensor of axis-angle rotations describing
-                       the local rotations of each joint.
-         -- root_positions: (N, L, 3) tensor describing the root joint positions.
-        """
-        assert len(rotations.shape) == 4
-        assert len(root_positions.shape) == 3
-        # transform from axis angle to quaternion
-        rotations = axis_angle_to_quaternion(rotations)
+def fk(pose, trans):
+    assert len(pose.shape) == 3
+    assert pose.shape[1] == 24
+    assert len(trans.shape) == 2
 
-        positions_world = []
-        rotations_world = []
+    world_positions = []
+    world_rotations = []
 
-        expanded_offsets = self._offsets.expand(
-            rotations.shape[0],
-            rotations.shape[1],
-            self._offsets.shape[0],
-            self._offsets.shape[1],
-        )
+    # Parallelize along the batch and time dimensions
+    for i, parent in enumerate(parents):
+        if parent == -1:
+            world_positions.append(trans)
+            r = R.from_rotvec(pose[:, 0])
+            world_rotations.append(r)
+        else:
+            pos = world_rotations[parent].apply(offsets[i]) + world_positions[parent]
+            world_positions.append(pos)
 
-        # Parallelize along the batch and time dimensions
-        for i in range(self._offsets.shape[0]):
-            if self._parents[i] == -1:
-                positions_world.append(root_positions)
-                rotations_world.append(rotations[:, :, 0])
+            if has_children[i]:
+                r = R.from_rotvec(pose[:, i])
+                world_rotations.append(world_rotations[parent] * r)
             else:
-                positions_world.append(
-                    quaternion_apply(
-                        rotations_world[self._parents[i]], expanded_offsets[:, :, i]
-                    )
-                    + positions_world[self._parents[i]]
-                )
-                if self._has_children[i]:
-                    rotations_world.append(
-                        quaternion_multiply(
-                            rotations_world[self._parents[i]], rotations[:, :, i]
-                        )
-                    )
-                else:
-                    # This joint is a terminal node -> it would be useless to compute the transformation
-                    rotations_world.append(None)
+                # This joint is a terminal node -> it would be useless to compute the transformation
+                world_rotations.append(None)
 
-        return torch.stack(positions_world, dim=3).permute(0, 1, 3, 2)
+    return np.stack(world_positions, axis=1)
