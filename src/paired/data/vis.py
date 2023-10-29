@@ -2,7 +2,6 @@ import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import cm
-from matplotlib.colors import ListedColormap
 
 from .skeleton import smpl_parents
 
@@ -85,10 +84,7 @@ def plot_skeleton(gifname, poses, contact=None, fps: int = 60):
     ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight)
     # Create lines initially without data
     lines = [ax.plot([], [], [], zorder=10, linewidth=1.5)[0] for _ in smpl_parents]
-    scat = [
-        ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
-        for _ in range(4)
-    ]
+    scat = [ax.scatter([], [], [], zorder=10, s=0) for _ in range(4)]
     axrange = 3
 
     # create contact labels
