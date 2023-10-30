@@ -1,5 +1,4 @@
 import torch
-from smplx import SMPL
 from tqdm.auto import tqdm
 
 from .features.kinetic import extract_kinetic_features
@@ -14,8 +13,6 @@ from .vis import SMPLSkeleton
 
 
 def extract_aistpp_features(dataset, model_path):
-    smpl = SMPL(model_path=model_path, gender="MALE", batch_size=1)
-
     for data in tqdm(dataset):
         dance = data["dance"]
         smpl_poses = dance["smpl_poses"]

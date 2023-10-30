@@ -16,6 +16,15 @@ from .quaternion import ax_to_6v
 from .skeleton import SMPLSkeleton
 
 
+def normalize(dance):
+    pose = dance["smpl_poses"]
+    trans = dance["smpl_trans"]
+
+    # normalize translations
+    trans = trans / dance["smpl_scaling"]
+    return trans, pose
+
+
 class PreProcessing:
     def __init__(self, fps: int = 30):
         self.fps = fps

@@ -30,6 +30,9 @@ setup(
         "torchvision",
         "wandb",
         "einops",
+        "webdataset",
+        "torchaudio",
+        "braceexpand",
     ],
     extras_require={
         "test": ["pytest", "pytest-xdist"],
