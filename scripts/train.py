@@ -140,6 +140,7 @@ def main(
     train_loader, val_loader = fabric.setup_dataloaders(train_loader, val_loader)
 
     skeleton = SMPLSkeleton(fabric.device)
+    smooth_l1 = torch.nn.SmoothL1Loss().to(fabric.device)
 
     if fabric.local_rank == 0:
         wandb.init()
@@ -156,6 +157,38 @@ def main(
     def db_to_power(S_db, amin=1e-10):
         S_db += math.log(amin)
         return torch.exp(S_db)
+
+    def as_pos(x_hat, max_val, min_val, length):
+        x_hat = x_hat[:, :, :31]
+
+        mag, phase = torch.chunk(x_hat, chunks=2, dim=1)
+        mag = mag / 2 + 0.5
+
+        mag = db_to_power(mag * (math.log(3600) - math.log(1e-10)))
+        mag = mag**0.5
+
+        phase *= torch.pi
+
+        real = mag * torch.cos(phase)
+        imag = mag * torch.sin(phase)
+
+        spec = torch.complex(real, imag)
+
+        spec = rearrange(spec, "b c f t -> (b c) f t")
+
+        motion_wav = torch.istft(
+            spec, n_fft=60, hop_length=60 // 4, length=length
+        )
+        poses = rearrange(motion_wav, "(b c) t -> b t c", b=x_hat.shape[0])
+
+        poses = poses * (max_val - min_val) + min_val
+
+        trans = poses[:, :, :3]
+        pose = rearrange(poses[:, :, 3:], "n t (j c) -> n t j c", j=24)
+
+        pose = ax_from_6v(pose)
+        positions = skeleton.forward(pose, trans)
+        return positions
 
     def process_batch(batch):
         # convert to 1d wav
@@ -184,7 +217,7 @@ def main(
         # batch x 1 x 128 x 431
         y = rearrange(batch["mel"], "b f t -> b 1 f t")
         y = TF.resize(
-            y, size=(32, 32), antialias=True, interpolation=InterpolationMode.NEAREST
+            y, size=(32, 32), interpolation=InterpolationMode.NEAREST
         )
         y_shape = y.shape
 
@@ -194,6 +227,14 @@ def main(
         x, y, _ = process_batch(batch)
 
         loss, parts = dm.training_step(x, y)
+
+        max_val = fabric.to_device(metadata["max"])
+        min_val = fabric.to_device(metadata["min"])
+
+        pos = as_pos(parts["x_t"], max_val, min_val, batch["poses"].shape[1])
+        geom_loss = smooth_l1(batch["positions"] , pos)
+
+        loss += 0.1 * geom_loss
 
         fabric.backward(loss.mean())
 

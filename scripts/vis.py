@@ -119,7 +119,7 @@ def vis(
         # batch x 1 x 128 x 431
         y = rearrange(batch["mel"], "b f t -> b 1 f t")
         y = TF.resize(
-            y, size=(32, 32), antialias=True, interpolation=InterpolationMode.NEAREST
+            y, size=(32, 32), interpolation=InterpolationMode.NEAREST
         )
         y_shape = y.shape
 

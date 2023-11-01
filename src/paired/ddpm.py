@@ -161,8 +161,26 @@ class DDPM(nn.Module):
         x_loss = simple_loss(x_noise, noise_in_x_t)
         y_loss = simple_loss(y_noise, noise_in_y_t)
 
-        total_loss = x_loss + y_loss
-        return total_loss, {"x_loss": x_loss, "y_loss": y_loss}
+        beta_t = self.beta[time]
+        alpha_t = self.alpha[time]
+        alpha_bar_t = self.alpha_bar[time]
+
+        p_x = reverse_process(
+            x_t,
+            beta_t,
+            alpha_t,
+            alpha_bar_t,
+            noise_in_x_t,
+            variance=beta_t,
+        )
+        x_t = p_x.sample()
+
+        x_t = torch.clamp(x_t, min=-1, max=1)
+        y_t = torch.clamp(y_t, min=-1, max=1)
+
+        total_loss = (x_loss + y_loss) / 2
+
+        return total_loss, {"x_loss": x_loss, "y_loss": y_loss, "x_t": x_t, "y_t": y_t}
 
     def sampling_step(self, x_t: Tensor, y_t: Tensor, t: Tensor) -> Tensor:
         r"""Denoise image by sampling from :math:`p_\theta(x_{t-1}|x_t)`
